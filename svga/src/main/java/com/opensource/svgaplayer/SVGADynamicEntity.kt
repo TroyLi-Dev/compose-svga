@@ -3,6 +3,8 @@ package com.opensource.svgaplayer
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
+import android.os.Handler
+import android.os.Looper
 import android.text.BoringLayout
 import android.text.StaticLayout
 import android.text.TextPaint
@@ -83,7 +85,8 @@ class SVGADynamicEntity {
     }
 
     fun setDynamicImage(url: String, forKey: String) {
-        val handler = android.os.Handler()
+        // 修复：使用 Looper.getMainLooper() 避免 Handler 弃用警告
+        val handler = Handler(Looper.getMainLooper())
         SVGAParser.threadPoolExecutor.execute {
             (URL(url).openConnection() as? HttpURLConnection)?.let {
                 try {
@@ -91,8 +94,8 @@ class SVGADynamicEntity {
                     it.requestMethod = "GET"
                     it.connect()
                     it.inputStream.use { stream ->
-                        BitmapFactory.decodeStream(stream)?.let {
-                            handler.post { setDynamicImage(it, forKey) }
+                        BitmapFactory.decodeStream(stream)?.let { bitmap ->
+                            handler.post { setDynamicImage(bitmap, forKey) }
                         }
                     }
                 } catch (e: Exception) {
@@ -139,11 +142,11 @@ class SVGADynamicEntity {
                         if (it.get(key) == null) {
                             it.put(key, intArrayOf(x0, y0, x1, y1))
                         } else {
-                            it.get(key)?.let {
-                                it[0] = x0
-                                it[1] = y0
-                                it[2] = x1
-                                it[3] = y1
+                            it.get(key)?.let { area ->
+                                area[0] = x0
+                                area[1] = y0
+                                area[2] = x1
+                                area[3] = y1
                             }
                         }
                     }
@@ -159,11 +162,11 @@ class SVGADynamicEntity {
                     if (it.get(key) == null) {
                         it.put(key, intArrayOf(x0, y0, x1, y1))
                     } else {
-                        it.get(key)?.let {
-                            it[0] = x0
-                            it[1] = y0
-                            it[2] = x1
-                            it[3] = y1
+                        it.get(key)?.let { area ->
+                            area[0] = x0
+                            area[1] = y0
+                            area[2] = x1
+                            area[3] = y1
                         }
                     }
                 }

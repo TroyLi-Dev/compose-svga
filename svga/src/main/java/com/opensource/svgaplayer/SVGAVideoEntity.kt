@@ -1,7 +1,6 @@
 package com.opensource.svgaplayer
 
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.SoundPool
@@ -14,15 +13,11 @@ import com.opensource.svgaplayer.proto.AudioEntity
 import com.opensource.svgaplayer.proto.MovieEntity
 import com.opensource.svgaplayer.proto.MovieParams
 import com.opensource.svgaplayer.utils.SVGARect
-import com.opensource.svgaplayer.utils.log.LogUtils
 import org.json.JSONObject
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 
-/**
- * Created by PonyCui on 16/6/18.
- */
 class SVGAVideoEntity {
 
     private val TAG = "SVGAVideoEntity"
@@ -76,11 +71,13 @@ class SVGAVideoEntity {
         mNeedCutBitmap = needCutBitmap
         try {
             json.optJSONObject("movie")?.let { setupByJson(it) }
-        } catch (e: Exception) {}
+        } catch (e: Exception) {
+        }
 
         try {
             parserImages(json)
-        } catch (e: Exception) {}
+        } catch (e: Exception) {
+        }
         resetSprites(json)
     }
 
@@ -117,7 +114,8 @@ class SVGAVideoEntity {
         entity.params?.let(this::setupByMovie)
         try {
             parserImages(entity)
-        } catch (e: Exception) {}
+        } catch (e: Exception) {
+        }
         resetSprites(entity)
         if (entity.audios == null || entity.audios.isEmpty()) {
             movieItem = null
@@ -188,7 +186,7 @@ class SVGAVideoEntity {
                 mFrameHeight,
                 needCutBitmap = mNeedCutBitmap
             ) ?: createBitmap(filePath)
-            
+
             bitmap?.let { imageMap[entry.key] = it }
         }
     }
@@ -237,7 +235,7 @@ class SVGAVideoEntity {
         if (totalTime.toInt() == 0) {
             return item
         }
-        
+
         val currentPlayCallback = mPlayCallback
         if (currentPlayCallback != null) {
             val fileList = audiosFileMap.values.toList()
@@ -323,6 +321,7 @@ class SVGAVideoEntity {
                 .setMaxStreams(12.coerceAtMost(entity.audios.size))
                 .build()
         } else {
+            @Suppress("DEPRECATION")
             SoundPool(12.coerceAtMost(entity.audios.size), AudioManager.STREAM_MUSIC, 0)
         }
         soundPool?.setOnLoadCompleteListener { _, _, _ ->

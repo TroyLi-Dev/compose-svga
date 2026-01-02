@@ -80,7 +80,7 @@ internal class SVGAVideoShapeEntity {
     var shapePath: Path? = null
 
     private fun parseType(obj: JSONObject) {
-        obj.optString("type")?.let {
+        obj.optString("type").let {
             when {
                 it.equals("shape", ignoreCase = true) -> type = Type.shape
                 it.equals("rect", ignoreCase = true) -> type = Type.rect
@@ -212,7 +212,7 @@ internal class SVGAVideoShapeEntity {
 
     // 检查 alpha 范围是否是 [0f, 1f]，有可能是 [0f, 255f]
     private fun checkAlphaValueRange(color: ShapeEntity.ShapeStyle.RGBAColor): Float {
-        return if (color.a <= 1f) {
+        return if ((color.a ?: 0f) <= 1f) {
             255f
         } else {
             1f

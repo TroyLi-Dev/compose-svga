@@ -6,7 +6,16 @@ import android.widget.ImageView
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
@@ -21,12 +30,9 @@ import com.opensource.svgaplayer.SVGADynamicEntity
 import com.opensource.svgaplayer.SVGAParser
 import com.opensource.svgaplayer.SVGAVideoEntity
 import com.opensource.svgaplayer.drawer.SVGACanvasDrawer
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.yield
-import java.net.URL
-import java.util.*
+import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.min
 import kotlin.random.Random
@@ -53,9 +59,9 @@ private fun obtainBitmap(width: Int, height: Int): Bitmap {
 private val frameLruCache = object : LruCache<Long, Bitmap>(40 * 1024 * 1024) {
     override fun sizeOf(key: Long, value: Bitmap): Int = value.byteCount
     override fun entryRemoved(evicted: Boolean, key: Long, oldValue: Bitmap, newValue: Bitmap?) {
-        if (!oldValue.isRecycled) synchronized(bitmapPool) { 
-            if (bitmapPool.size < MAX_BITMAP_POOL_SIZE) bitmapPool.add(oldValue) 
-            else oldValue.recycle() 
+        if (!oldValue.isRecycled) synchronized(bitmapPool) {
+            if (bitmapPool.size < MAX_BITMAP_POOL_SIZE) bitmapPool.add(oldValue)
+            else oldValue.recycle()
         }
     }
 }
@@ -108,11 +114,11 @@ fun SvgaAnimation(
     }
 
     var videoEntity by remember(model) { mutableStateOf<SVGAVideoEntity?>(initialEntity) }
-    var loadState by remember(model) { 
-        mutableStateOf(if (initialEntity != null) SvgaLoadState.Success else SvgaLoadState.Loading) 
+    var loadState by remember(model) {
+        mutableStateOf(if (initialEntity != null) SvgaLoadState.Success else SvgaLoadState.Loading)
     }
     var componentSize by remember { mutableStateOf(IntSize.Zero) }
-    
+
     val startTime = remember(model) { GlobalStartTimes.getOrPut(model) { System.nanoTime() } }
     val drawer = remember(videoEntity, dynamicEntity) {
         videoEntity?.let { SVGACanvasDrawer(it, dynamicEntity ?: SVGADynamicEntity()) }
@@ -123,7 +129,7 @@ fun SvgaAnimation(
             val entity = videoEntity ?: return@derivedStateOf -1
             val systemLoad = systemLoadState.value
             val baseFps = min(if (entity.FPS > 0) entity.FPS else 30, maxFps)
-            
+
             if (isStop || (allowStopOnCriticalLoad && systemLoad.currentFps < 20)) return@derivedStateOf 0
 
             val targetFps = when (priority) {
@@ -151,30 +157,34 @@ fun SvgaAnimation(
                 loadState = SvgaLoadState.Success
                 onSuccess(videoItem); onPlay()
             }
+
             override fun onError(e: Exception, alias: String) {
                 loadState = SvgaLoadState.Error; onError(e)
             }
         })
     }
 
-    Box(modifier = modifier.onSizeChanged { componentSize = it }, contentAlignment = Alignment.Center) {
+    Box(
+        modifier = modifier.onSizeChanged { componentSize = it },
+        contentAlignment = Alignment.Center
+    ) {
         if (loadState == SvgaLoadState.Loading) loading?.invoke()
         if (loadState == SvgaLoadState.Error) failure?.invoke()
 
         Canvas(modifier = Modifier.fillMaxSize()) {
-            val frameIndex = currentFrameIndex 
+            val frameIndex = currentFrameIndex
             val entity = videoEntity ?: return@Canvas
             val canvasDrawer = drawer ?: return@Canvas
-            
+
             val normW = (componentSize.width + 7) and -8
             val normH = (componentSize.height + 7) and -8
-            
+
             if (frameIndex < 0 || normW <= 0) return@Canvas
 
             val cacheKey = ((model.hashCode().toLong() and 0xFFFFFFFFL) shl 32) or
-                           ((frameIndex.toLong() and 0xFFFL) shl 20) or
-                           ((normW.toLong() and 0x3FFL) shl 10) or
-                           (normH.toLong() and 0x3FFL)
+                    ((frameIndex.toLong() and 0xFFFL) shl 20) or
+                    ((normW.toLong() and 0x3FFL) shl 10) or
+                    (normH.toLong() and 0x3FFL)
 
             var frameBitmap = frameLruCache.get(cacheKey)
 
@@ -183,7 +193,7 @@ fun SvgaAnimation(
                 synchronized(sharedRenderCanvas) {
                     sharedRenderCanvas.setBitmap(frameBitmap)
                     sharedRenderCanvas.drawColor(0, android.graphics.PorterDuff.Mode.CLEAR)
-                    
+
                     // 修复：将 Compose 的 ContentScale 映射到 SVGA 原生的 ScaleType
                     val svgaScaleType = when (contentScale) {
                         ContentScale.FillBounds -> ImageView.ScaleType.FIT_XY
@@ -192,7 +202,7 @@ fun SvgaAnimation(
                         ContentScale.Fit -> ImageView.ScaleType.FIT_CENTER
                         else -> ImageView.ScaleType.FIT_CENTER
                     }
-                    
+
                     canvasDrawer.drawFrame(sharedRenderCanvas, frameIndex, svgaScaleType)
                     sharedRenderCanvas.setBitmap(null)
                 }

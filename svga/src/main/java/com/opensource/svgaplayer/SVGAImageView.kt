@@ -11,7 +11,6 @@ import android.view.View
 import android.view.animation.LinearInterpolator
 import android.widget.ImageView
 import com.opensource.svgaplayer.utils.SVGARange
-import com.opensource.svgaplayer.utils.log.LogUtils
 import com.rui.composes.svga.R
 import java.lang.ref.WeakReference
 import java.net.URL
@@ -68,31 +67,26 @@ open class SVGAImageView @JvmOverloads constructor(
     }
 
     fun setLowMemoryDevicesFPS() {
-        forceLowFPS = SVGAMemCalculator.instance.isAbsLowMemoryDevice  // 4gb以及以下的设备，限制到一定的fps
+        forceLowFPS = SVGAMemCalculator.instance.isAbsLowMemoryDevice
     }
 
     private fun loadAttrs(attrs: AttributeSet) {
         val typedArray =
             context.theme.obtainStyledAttributes(attrs, R.styleable.SVGAImageView, 0, 0)
         loops = typedArray.getInt(R.styleable.SVGAImageView_loopCount, 0)
+
+        @Suppress("DEPRECATION")
         clearsAfterStop = typedArray.getBoolean(R.styleable.SVGAImageView_clearsAfterStop, false)
+
         clearsAfterDetached =
             typedArray.getBoolean(R.styleable.SVGAImageView_clearsAfterDetached, false)
         mAntiAlias = typedArray.getBoolean(R.styleable.SVGAImageView_antiAlias, true)
         mAutoPlay = typedArray.getBoolean(R.styleable.SVGAImageView_autoPlay, true)
         typedArray.getString(R.styleable.SVGAImageView_fillMode)?.let {
             when (it) {
-                "0" -> {
-                    fillMode = FillMode.Backward
-                }
-
-                "1" -> {
-                    fillMode = FillMode.Forward
-                }
-
-                "2" -> {
-                    fillMode = FillMode.Clear
-                }
+                "0" -> fillMode = FillMode.Backward
+                "1" -> fillMode = FillMode.Forward
+                "2" -> fillMode = FillMode.Clear
             }
         }
 
@@ -143,7 +137,6 @@ open class SVGAImageView @JvmOverloads constructor(
     }
 
     private fun play(range: SVGARange?, reverse: Boolean) {
-        LogUtils.info(TAG, "================ start animation ================")
         val drawable = getSVGADrawable() ?: return
         setupDrawable()
         mStartFrame = Math.max(0, range?.location ?: 0)
@@ -195,14 +188,8 @@ open class SVGAImageView @JvmOverloads constructor(
                 setMethod.isAccessible = true
                 setMethod.invoke(animatorClass, 1.0f)
                 scale = 1.0
-                LogUtils.info(
-                    TAG,
-                    "The animation duration scale has been reset to" +
-                            " 1.0x, because you closed it on developer options."
-                )
             }
         } catch (ignore: Exception) {
-            ignore.printStackTrace()
         }
         return scale
     }
@@ -217,7 +204,8 @@ open class SVGAImageView @JvmOverloads constructor(
 
     private fun onAnimationEnd(animation: Animator?) {
         isAnimating = false
-        stopAnimation()
+        @Suppress("DEPRECATION")
+        stopAnimation(clear = clearsAfterStop)
         val drawable = getSVGADrawable()
         if (drawable != null) {
             when (fillMode) {
@@ -243,25 +231,18 @@ open class SVGAImageView @JvmOverloads constructor(
         svgaDrawble?.cleared = true
         svgaDrawble?.clear()
         svgaDrawble = null
-        // 清除对 drawable 的引用
         setImageDrawable(null)
     }
 
-    /**
-     * 清理svgadrawable 用于房间的礼物面板的banner
-     */
     fun clearSVGADrawable() {
-        // 只清理SVGADrawable，如果
         getSVGADrawable()?.let {
             it.cleared = true
             it.clear()
             svgaDrawble?.cleared = true
             svgaDrawble?.clear()
             svgaDrawble = null
-            // 清除对 drawable 的引用
             setImageDrawable(null)
         }
-
     }
 
     fun pauseAnimation() {
@@ -270,6 +251,7 @@ open class SVGAImageView @JvmOverloads constructor(
     }
 
     fun stopAnimation() {
+        @Suppress("DEPRECATION")
         stopAnimation(clear = clearsAfterStop)
     }
 
@@ -355,7 +337,7 @@ open class SVGAImageView @JvmOverloads constructor(
     }
 
     private class AnimatorListener(view: SVGAImageView) :
-        Animator.AnimatorListener { // end of AnimatorListener
+        Animator.AnimatorListener {
         private val weakReference = WeakReference<SVGAImageView>(view)
 
         override fun onAnimationRepeat(animation: Animator) {
@@ -378,7 +360,7 @@ open class SVGAImageView @JvmOverloads constructor(
 
 
     private class AnimatorUpdateListener(view: SVGAImageView) :
-        ValueAnimator.AnimatorUpdateListener { // end of AnimatorUpdateListener
+        ValueAnimator.AnimatorUpdateListener {
         private val weakReference = WeakReference<SVGAImageView>(view)
 
         override fun onAnimationUpdate(animation: ValueAnimator) {
@@ -391,19 +373,16 @@ open class SVGAImageView @JvmOverloads constructor(
         try {
             return super.performClick()
         } catch (e: Exception) {
-            e.toString()
             return false
         }
     }
 
 
     fun resetit() {
-        // Clear the drawable and stop any animations
         clear()
-
-        // Reset animation related properties
         isAnimating = false
         loops = 0
+        @Suppress("DEPRECATION")
         clearsAfterStop = false
         clearsAfterDetached = false
         fillMode = FillMode.Forward
@@ -415,9 +394,5 @@ open class SVGAImageView @JvmOverloads constructor(
         mEndFrame = 0
         callback = null
         mItemClickAreaListener = null
-
-
-
-        LogUtils.info(TAG, "SVGAImageView has been reset to its default state.")
     }
 }
