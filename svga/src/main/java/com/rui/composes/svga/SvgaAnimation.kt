@@ -12,9 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.IntSize
 import com.opensource.svgaplayer.SVGADynamicEntity
@@ -29,9 +27,9 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.min
 import kotlin.random.Random
 
-// --- 基础性能组件 ---
+// --- 极致性能底层池 ---
 private val bitmapPool = Collections.synchronizedList(mutableListOf<Bitmap>())
-private const val MAX_BITMAP_POOL_SIZE = 80
+private const val MAX_BITMAP_POOL_SIZE = 60
 
 private fun obtainBitmap(width: Int, height: Int): Bitmap {
     synchronized(bitmapPool) {
@@ -51,12 +49,7 @@ private fun obtainBitmap(width: Int, height: Int): Bitmap {
 private val frameLruCache = object : LruCache<Long, Bitmap>(40 * 1024 * 1024) {
     override fun sizeOf(key: Long, value: Bitmap): Int = value.byteCount
     override fun entryRemoved(evicted: Boolean, key: Long, oldValue: Bitmap, newValue: Bitmap?) {
-        if (!oldValue.isRecycled) {
-            synchronized(bitmapPool) {
-                if (bitmapPool.size < MAX_BITMAP_POOL_SIZE) bitmapPool.add(oldValue)
-                else oldValue.recycle()
-            }
-        }
+        if (!oldValue.isRecycled) synchronized(bitmapPool) { if (bitmapPool.size < MAX_BITMAP_POOL_SIZE) bitmapPool.add(oldValue) else oldValue.recycle() }
     }
 }
 
@@ -71,15 +64,13 @@ data class SystemLoad(val currentFps: Int = 60)
 val LocalSystemLoad = staticCompositionLocalOf { mutableStateOf(SystemLoad()) }
 val LocalSvgaClock = staticCompositionLocalOf<State<Long>> { error("No clock") }
 
-/**
- * 动画状态枚举
- */
-enum class SvgaLoadState {
-    Loading, Success, Error
-}
+enum class SvgaLoadState { Loading, Success, Error }
 
 /**
- * 极致性能、使用友好的 Compose SVGA 组件
+ * 极致性能优化版：解决 20 个与 100 个消耗一致的问题
+ * 1. 使用 derivedStateOf 实现按需重绘，低优先级组件大幅降低绘制频率。
+ * 2. 修复 onPlay, onStep, onFinished 等生命周期回调。
+ * 3. 保持 BitmapPool 和 LruCache 以杜绝 GC 和 OOM。
  */
 @Composable
 fun SvgaAnimation(
@@ -92,13 +83,11 @@ fun SvgaAnimation(
     dynamicEntity: SVGADynamicEntity? = null,
     isStop: Boolean = false,
     contentScale: ContentScale = ContentScale.Fit,
-    // 生命周期回调
     onPlay: () -> Unit = {},
     onSuccess: (SVGAVideoEntity) -> Unit = {},
     onError: (Exception) -> Unit = {},
     onStep: (frame: Int, percentage: Double) -> Unit = { _, _ -> },
     onFinished: () -> Unit = {},
-    // 占位 UI
     loading: @Composable (() -> Unit)? = null,
     failure: @Composable (() -> Unit)? = null
 ) {
@@ -109,24 +98,71 @@ fun SvgaAnimation(
     var videoEntity by remember(model) { mutableStateOf<SVGAVideoEntity?>(null) }
     var loadState by remember(model) { mutableStateOf(SvgaLoadState.Loading) }
     var componentSize by remember { mutableStateOf(IntSize.Zero) }
-    var isVisible by remember { mutableStateOf(true) }
     
-    var playTriggered by remember(model) { mutableStateOf(false) }
-    var finishedTriggered by remember(model) { mutableStateOf(false) }
-
     val startTime = remember(model) { GlobalStartTimes.getOrPut(model) { System.nanoTime() } }
     val drawer = remember(videoEntity, dynamicEntity) {
         videoEntity?.let { SVGACanvasDrawer(it, dynamicEntity ?: SVGADynamicEntity()) }
     }
 
+    // 1. 按需重绘驱动：只有帧号改变时才触发重绘
+    val currentFrameIndex by remember(videoEntity, priority, systemLoad, isStop, allowStopOnCriticalLoad) {
+        derivedStateOf {
+            val entity = videoEntity ?: return@derivedStateOf -1
+            val tick = globalTickState.value 
+            
+            val baseFps = min(if (entity.FPS > 0) entity.FPS else 30, maxFps)
+            val isCriticalLoad = allowStopOnCriticalLoad && systemLoad.currentFps < 20
+            if (isStop || isCriticalLoad) return@derivedStateOf 0
+
+            val targetFps = when (priority) {
+                SvgaPriority.High -> baseFps
+                SvgaPriority.Normal -> if (systemLoad.currentFps < 45) baseFps / 2 else baseFps
+                SvgaPriority.Low -> if (systemLoad.currentFps < 40) baseFps / 4 else baseFps / 2
+            }.coerceAtLeast(1)
+
+            val frameDurationNanos = 1_000_000_000L / targetFps
+            val totalElapsedFrames = ((tick - startTime) / frameDurationNanos).toInt()
+            val totalFrames = entity.frames
+            
+            if (loops > 0 && totalElapsedFrames / totalFrames >= loops) totalFrames - 1
+            else totalElapsedFrames % totalFrames
+        }
+    }
+
+    // 2. 播放结束判定
+    val isAnimationFinished by remember(videoEntity, loops) {
+        derivedStateOf {
+            val entity = videoEntity ?: return@derivedStateOf false
+            if (loops <= 0) return@derivedStateOf false
+            val tick = globalTickState.value
+            val baseFps = min(entity.FPS, maxFps)
+            val frameDurationNanos = 1_000_000_000L / baseFps
+            ((tick - startTime) / (frameDurationNanos * entity.frames)) >= loops
+        }
+    }
+
+    // --- 回调修复：使用 LaunchedEffect 监听派生状态变化 ---
+    LaunchedEffect(videoEntity) {
+        if (videoEntity != null) onPlay()
+    }
+
+    LaunchedEffect(currentFrameIndex) {
+        val entity = videoEntity ?: return@LaunchedEffect
+        if (currentFrameIndex >= 0 && !isAnimationFinished) {
+            onStep(currentFrameIndex, (currentFrameIndex + 1).toDouble() / entity.frames)
+        }
+    }
+
+    LaunchedEffect(isAnimationFinished) {
+        if (isAnimationFinished) onFinished()
+    }
+
     LaunchedEffect(model, componentSize) {
-        if (componentSize.width <= 0 || componentSize.height <= 0) return@LaunchedEffect
+        if (componentSize.width <= 0) return@LaunchedEffect
         delay(Random.nextLong(10, 150))
         yield()
-
         val parser = SVGAParser(context)
         parser.setFrameSize(componentSize.width, componentSize.height)
-
         val callback = object : SVGAParser.ParseCompletion {
             override fun onComplete(videoItem: SVGAVideoEntity) {
                 videoEntity = videoItem
@@ -138,75 +174,25 @@ fun SvgaAnimation(
                 onError(e)
             }
         }
-
-        val url = model as? String ?: return@LaunchedEffect
-        if (url.startsWith("http")) parser.decodeFromURL(URL(url), callback)
-        else parser.decodeFromAssets(url, callback)
+        if (model is String) {
+            if (model.startsWith("http")) parser.decodeFromURL(URL(model), callback)
+            else parser.decodeFromAssets(model, callback)
+        }
     }
 
-    Box(
-        modifier = modifier
-            .onSizeChanged { componentSize = it }
-            .onGloballyPositioned { coords ->
-                val y = coords.positionInWindow().y
-                isVisible = y > -1500 && y < 5000 
-            },
-        contentAlignment = Alignment.Center
-    ) {
-        when (loadState) {
-            SvgaLoadState.Loading -> loading?.invoke()
-            SvgaLoadState.Error -> failure?.invoke()
-            SvgaLoadState.Success -> {} 
-        }
+    Box(modifier = modifier.onSizeChanged { componentSize = it }, contentAlignment = Alignment.Center) {
+        if (loadState == SvgaLoadState.Loading) loading?.invoke()
+        if (loadState == SvgaLoadState.Error) failure?.invoke()
 
         Canvas(modifier = Modifier.fillMaxSize()) {
-            if (!isVisible || loadState != SvgaLoadState.Success) return@Canvas
-
-            val tick = globalTickState.value
+            val frameIndex = currentFrameIndex 
             val entity = videoEntity ?: return@Canvas
             val canvasDrawer = drawer ?: return@Canvas
             val w = componentSize.width
             val h = componentSize.height
-            if (w <= 0 || h <= 0) return@Canvas
+            if (frameIndex < 0 || w <= 0 || h <= 0) return@Canvas
 
-            if (!playTriggered) {
-                playTriggered = true
-                onPlay()
-            }
-
-            val baseFps = min(if (entity.FPS > 0) entity.FPS else 30, maxFps)
-            val isCriticalLoad = allowStopOnCriticalLoad && systemLoad.currentFps < 20
-            val targetFps = when (priority) {
-                SvgaPriority.High -> baseFps
-                SvgaPriority.Normal -> if (systemLoad.currentFps < 45) baseFps / 2 else baseFps
-                SvgaPriority.Low -> if (systemLoad.currentFps < 40) baseFps / 4 else baseFps / 2
-            }.coerceAtLeast(1)
-
-            val frameDurationNanos = 1_000_000_000L / targetFps
-            val elapsedNanos = tick - startTime
-            val totalFrames = entity.frames
-
-            val totalElapsedFrames = (elapsedNanos / frameDurationNanos).toInt()
-            val currentIteration = totalElapsedFrames / totalFrames
-            val frameIndex: Int
-
-            if (isStop || isCriticalLoad) {
-                frameIndex = 0
-            } else {
-                if (loops > 0 && currentIteration >= loops) {
-                    frameIndex = totalFrames - 1
-                    if (!finishedTriggered) {
-                        finishedTriggered = true
-                        onFinished()
-                    }
-                } else {
-                    frameIndex = (totalElapsedFrames % totalFrames)
-                    if (priority != SvgaPriority.Low) {
-                        onStep(frameIndex, (frameIndex + 1).toDouble() / totalFrames)
-                    }
-                }
-            }
-
+            // 零 GC Key
             val cacheKey = ((model.hashCode().toLong() and 0xFFFFFFFFL) shl 32) or
                            ((frameIndex and 0xFFF).toLong() shl 20) or
                            ((w and 0x3FF).toLong() shl 10) or
