@@ -38,11 +38,9 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -85,24 +83,10 @@ class MainActivity : ComponentActivity() {
         SVGALogger.setLogEnabled(true)
         setContent {
             ComposesvgaTheme {
-                // 1. 全局 SVGA 时钟信号
-                val svgaTick = remember { mutableLongStateOf(System.nanoTime()) }
-                LaunchedEffect(Unit) {
-                    while (true) {
-                        withFrameNanos { svgaTick.longValue = it }
-                    }
-                }
-
-                // 2. 全局负载监控 (用于 Normal 优先级的自适应降频)
-                val systemLoad = remember { mutableStateOf(SystemLoad()) }
-
-                CompositionLocalProvider(
-                    LocalSvgaClock provides svgaTick,
-                    LocalSystemLoad provides systemLoad
-                ) {
+                SvgaProvider {
                     val context = LocalContext.current
                     var isInterferenceEnabled by remember { mutableStateOf(false) }
-
+                    val systemLoad = LocalSystemLoad.current
                     Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                         Box(modifier = Modifier.padding(innerPadding)) {
                             SvgaTestScreen(
