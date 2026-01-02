@@ -20,6 +20,7 @@
 ####1. 初始化全局环境
 在 MainActivity 或 Application 中，设置 Compose 内容前初始化解析器：
 ...
+
 class MainActivity : ComponentActivity() {override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // 初始化全局解析器，建议在 onCreate 最开始执行
@@ -41,4 +42,5 @@ class MainActivity : ComponentActivity() {override fun onCreate(savedInstanceSta
         }
     }
 }
+
 ...
