@@ -6,24 +6,35 @@ import android.os.Looper
 import android.util.Log
 import com.opensource.svgaplayer.proto.MovieEntity
 import org.json.JSONObject
-import java.io.*
+import java.io.BufferedInputStream
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileOutputStream
+import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
-import java.util.concurrent.*
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.zip.Inflater
 import java.util.zip.ZipInputStream
 
 class SVGAParser(context: Context?, val needCutBitmap: Boolean = false) {
     private var mContext = context?.applicationContext
-    
+
     init {
         SVGACache.onCreate(context)
         SVGAMemCalculator.instance.init(context?.applicationContext)
     }
 
-    @Volatile private var mFrameWidth: Int = 0
-    @Volatile private var mFrameHeight: Int = 0
+    @Volatile
+    private var mFrameWidth: Int = 0
+    @Volatile
+    private var mFrameHeight: Int = 0
 
     interface ParseCompletion {
         fun onComplete(videoItem: SVGAVideoEntity)
@@ -36,16 +47,20 @@ class SVGAParser(context: Context?, val needCutBitmap: Boolean = false) {
 
     companion object {
         private val ongoingTasks = ConcurrentHashMap<String, MutableList<ParseCompletion>>()
+
         // 文件级别同步锁映射，防止并发解压冲突
         private val fileLocks = ConcurrentHashMap<String, Any>()
         val threadNum = AtomicInteger(0)
-        
+
         @JvmStatic
         internal var threadPoolExecutor: ExecutorService = ThreadPoolExecutor(
             4, 12, 30L, TimeUnit.SECONDS, LinkedBlockingQueue<Runnable>()
         ) { r -> Thread(r, "SVGAParser-Thread-${threadNum.getAndIncrement()}") }
-        
-        fun setThreadPoolExecutor(executor: ExecutorService) { threadPoolExecutor = executor }
+
+        fun setThreadPoolExecutor(executor: ExecutorService) {
+            threadPoolExecutor = executor
+        }
+
         private val mShareParser = SVGAParser(null)
         fun shareParser(): SVGAParser = mShareParser
     }
@@ -62,7 +77,11 @@ class SVGAParser(context: Context?, val needCutBitmap: Boolean = false) {
 
     private val handler = Handler(Looper.getMainLooper())
 
-    fun decodeFromURL(url: URL, callback: ParseCompletion?, playCallback: PlayCallback? = null): (() -> Unit)? {
+    fun decodeFromURL(
+        url: URL,
+        callback: ParseCompletion?,
+        playCallback: PlayCallback? = null
+    ): (() -> Unit)? {
         if (mContext == null) return null
         val cacheKey = SVGACache.buildCacheKey(url)
         val cachedEntity = SVGAActivitiesCache.instance.get(cacheKey)
@@ -77,13 +96,19 @@ class SVGAParser(context: Context?, val needCutBitmap: Boolean = false) {
                 callback?.let { list.add(it) }
                 return null
             }
-            ongoingTasks[cacheKey] = mutableListOf<ParseCompletion>().apply { callback?.let { add(it) } }
+            ongoingTasks[cacheKey] =
+                mutableListOf<ParseCompletion>().apply { callback?.let { add(it) } }
         }
 
         return FileDownloader().resume(url, { inputStream ->
             decodeFromInputStream(inputStream, cacheKey, object : ParseCompletion {
-                override fun onComplete(videoItem: SVGAVideoEntity) { notifyResult(cacheKey, videoItem, null) }
-                override fun onError(e: Exception, alias: String) { notifyResult(cacheKey, null, e) }
+                override fun onComplete(videoItem: SVGAVideoEntity) {
+                    notifyResult(cacheKey, videoItem, null)
+                }
+
+                override fun onError(e: Exception, alias: String) {
+                    notifyResult(cacheKey, null, e)
+                }
             }, false, playCallback, url.toString())
         }, { e -> notifyResult(cacheKey, null, e) })
     }
@@ -98,14 +123,20 @@ class SVGAParser(context: Context?, val needCutBitmap: Boolean = false) {
         }
     }
 
-    fun decodeFromAssets(name: String, callback: ParseCompletion?, playCallback: PlayCallback? = null) {
+    fun decodeFromAssets(
+        name: String,
+        callback: ParseCompletion?,
+        playCallback: PlayCallback? = null
+    ) {
         val cacheKey = SVGACache.buildCacheKey("file:///assets/$name")
         threadPoolExecutor.execute {
             try {
                 mContext?.assets?.open(name)?.let {
                     decodeFromInputStream(it, cacheKey, callback, true, playCallback, name)
                 }
-            } catch (e: Exception) { handler.post { callback?.onError(e, name) } }
+            } catch (e: Exception) {
+                handler.post { callback?.onError(e, name) }
+            }
         }
     }
 
@@ -117,7 +148,7 @@ class SVGAParser(context: Context?, val needCutBitmap: Boolean = false) {
             try {
                 val bytes = inputStream.readBytes()
                 val cacheDir = SVGACache.buildCacheDir(cacheKey)
-                
+
                 // 关键：基于文件的同步锁，解决并发解压导致的 unimplemented 错误
                 val lock = fileLocks.getOrPut(cacheKey) { Any() }
                 synchronized(lock) {
@@ -128,7 +159,13 @@ class SVGAParser(context: Context?, val needCutBitmap: Boolean = false) {
                         decodeFromCacheDir(cacheDir, cacheKey, callback, alias)
                     } else {
                         inflate(bytes)?.let { decoded ->
-                            val entity = SVGAVideoEntity(MovieEntity.ADAPTER.decode(decoded), cacheDir, mFrameWidth, mFrameHeight, false)
+                            val entity = SVGAVideoEntity(
+                                MovieEntity.ADAPTER.decode(decoded),
+                                cacheDir,
+                                mFrameWidth,
+                                mFrameHeight,
+                                false
+                            )
                             entity.prepare({
                                 SVGAActivitiesCache.instance.put(cacheKey, entity)
                                 handler.post { callback?.onComplete(entity) }
@@ -136,22 +173,41 @@ class SVGAParser(context: Context?, val needCutBitmap: Boolean = false) {
                         }
                     }
                 }
-            } catch (e: Exception) { 
+            } catch (e: Exception) {
                 Log.e("SVGAParser", "Decode failed: $alias", e)
-                handler.post { callback?.onError(e, alias ?: "") } 
-            } finally { 
+                handler.post { callback?.onError(e, alias ?: "") }
+            } finally {
                 if (closeInputStream) inputStream.close()
             }
         }
     }
 
-    private fun decodeFromCacheDir(cacheDir: File, cacheKey: String, callback: ParseCompletion?, alias: String?) {
+    private fun decodeFromCacheDir(
+        cacheDir: File,
+        cacheKey: String,
+        callback: ParseCompletion?,
+        alias: String?
+    ) {
         val binaryFile = File(cacheDir, "movie.binary")
         val specFile = File(cacheDir, "movie.spec")
         try {
             val entity = when {
-                binaryFile.exists() -> SVGAVideoEntity(MovieEntity.ADAPTER.decode(binaryFile.readBytes()), cacheDir, mFrameWidth, mFrameHeight, false)
-                specFile.exists() -> SVGAVideoEntity(JSONObject(specFile.readText()), cacheDir, mFrameWidth, mFrameHeight, false)
+                binaryFile.exists() -> SVGAVideoEntity(
+                    MovieEntity.ADAPTER.decode(binaryFile.readBytes()),
+                    cacheDir,
+                    mFrameWidth,
+                    mFrameHeight,
+                    false
+                )
+
+                specFile.exists() -> SVGAVideoEntity(
+                    JSONObject(specFile.readText()),
+                    cacheDir,
+                    mFrameWidth,
+                    mFrameHeight,
+                    false
+                )
+
                 else -> throw Exception("No metadata found")
             }
             entity.prepare({
@@ -163,7 +219,8 @@ class SVGAParser(context: Context?, val needCutBitmap: Boolean = false) {
         }
     }
 
-    private fun isZipFile(bytes: ByteArray): Boolean = bytes.size > 4 && bytes[0].toInt() == 80 && bytes[1].toInt() == 75 && bytes[2].toInt() == 3 && bytes[3].toInt() == 4
+    private fun isZipFile(bytes: ByteArray): Boolean =
+        bytes.size > 4 && bytes[0].toInt() == 80 && bytes[1].toInt() == 75 && bytes[2].toInt() == 3 && bytes[3].toInt() == 4
 
     private fun unzip(inputStream: InputStream, cacheKey: String) {
         val cacheDir = SVGACache.buildCacheDir(cacheKey).apply { mkdirs() }
@@ -195,16 +252,25 @@ class SVGAParser(context: Context?, val needCutBitmap: Boolean = false) {
     }
 
     private class FileDownloader {
-        fun resume(url: URL, complete: (InputStream) -> Unit, failure: (Exception) -> Unit): () -> Unit {
+        fun resume(
+            url: URL,
+            complete: (InputStream) -> Unit,
+            failure: (Exception) -> Unit
+        ): () -> Unit {
             var cancelled = false
             threadPoolExecutor.execute {
                 try {
                     val conn = url.openConnection() as HttpURLConnection
                     conn.connectTimeout = 15000
-                    conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 10) SVGA/Compose")
+                    conn.setRequestProperty(
+                        "User-Agent",
+                        "Mozilla/5.0 (Linux; Android 10) SVGA/Compose"
+                    )
                     conn.connect()
                     if (!cancelled) complete(conn.inputStream)
-                } catch (e: Exception) { if (!cancelled) failure(e) }
+                } catch (e: Exception) {
+                    if (!cancelled) failure(e)
+                }
             }
             return { cancelled = true }
         }

@@ -38,17 +38,18 @@ class SVGADrawable(val videoItem: SVGAVideoEntity, val dynamicItem: SVGADynamicE
         if (cleared) {
             return
         }
-        canvas?.let {
-            drawer.drawFrame(it, currentFrame, scaleType)
-        }
+        // 修复：移除对非空 Canvas 的冗余安全调用
+        drawer.drawFrame(canvas, currentFrame, scaleType)
     }
 
     override fun setAlpha(alpha: Int) {
 
     }
 
+    @Suppress("DeprecatedCallableAddReplaceWith")
+    @Deprecated("Deprecated in Java", ReplaceWith("PixelFormat.TRANSLUCENT"))
     override fun getOpacity(): Int {
-        return PixelFormat.TRANSPARENT
+        return PixelFormat.TRANSLUCENT
     }
 
     override fun setColorFilter(colorFilter: ColorFilter?) {

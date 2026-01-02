@@ -31,6 +31,19 @@ android {
     }
 }
 
+publishing {
+    publications {
+        create<MavenPublication>("release") {
+            groupId = "com.github.TroyLi-Dev"
+            artifactId = "compose-svga"
+            version = project.version as String? ?: "unspecified"
+            afterEvaluate {
+                from(components["release"])
+            }
+        }
+    }
+}
+
 kotlin {
     compilerOptions {
         jvmTarget.set(JvmTarget.JVM_11)
