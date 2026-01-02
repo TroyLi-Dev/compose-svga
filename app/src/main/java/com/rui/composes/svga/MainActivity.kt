@@ -367,8 +367,7 @@ fun SvgaTestScreen(
             itemsIndexed(items) { index, randomUrl ->
                 SvgaAnimation(
                     model = randomUrl,
-                    // index 小于 20 的 Normal 自动降频，大于 20 的 Low 强制低频
-                    priority = if (index < 20) SvgaPriority.Normal else SvgaPriority.Low,
+                    priority = SvgaPriority.Low,
                     dynamicEntity = if (index % 5 == 0) testDynamicEntity else null,
                     modifier = Modifier
                         .aspectRatio(1f)
@@ -433,7 +432,7 @@ fun SvgaTestScreen(
 
             SvgaAnimation(
                 model = "https://d2180mnhafnhva.cloudfront.net/05213178614dfb7b0bdd9d19f82c9f5d.svga",
-                priority = SvgaPriority.High,
+                priority = SvgaPriority.Normal,
                 dynamicEntity = testDynamicEntity,
                 modifier = Modifier
                     .fillMaxWidth()
