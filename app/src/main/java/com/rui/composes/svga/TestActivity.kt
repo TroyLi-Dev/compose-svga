@@ -19,9 +19,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import com.opensource.svgaplayer.compose.LocalSvgaClock
-import com.opensource.svgaplayer.compose.LocalSystemLoad
-import com.opensource.svgaplayer.compose.SystemLoad
 import com.rui.composes.svga.ui.theme.ComposesvgaTheme
 
 class TestActivity : ComponentActivity() {
