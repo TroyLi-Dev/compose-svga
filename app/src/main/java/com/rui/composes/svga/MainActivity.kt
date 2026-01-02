@@ -353,7 +353,7 @@ fun SvgaTestScreen(
             fontSize = 14.sp
         )
 
-        val items = remember { (0..300).map { svgaUrls.random() } }
+        val items = remember { (0..50).map { svgaUrls.random() } }
 
         LazyVerticalGrid(
             columns = GridCells.Fixed(10),
