@@ -66,11 +66,6 @@ import androidx.compose.ui.unit.sp
 import coil.ImageLoader
 import coil.request.ImageRequest
 import com.opensource.svgaplayer.SVGADynamicEntity
-import com.opensource.svgaplayer.compose.LocalSvgaClock
-import com.opensource.svgaplayer.compose.LocalSystemLoad
-import com.opensource.svgaplayer.compose.SvgaAnimation
-import com.opensource.svgaplayer.compose.SvgaPriority
-import com.opensource.svgaplayer.compose.SystemLoad
 import com.opensource.svgaplayer.utils.log.SVGALogger
 import com.rui.composes.svga.ui.theme.ComposesvgaTheme
 import kotlinx.coroutines.delay
@@ -88,7 +83,6 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         SVGALogger.setLogEnabled(true)
-
         setContent {
             ComposesvgaTheme {
                 // 1. 全局 SVGA 时钟信号
