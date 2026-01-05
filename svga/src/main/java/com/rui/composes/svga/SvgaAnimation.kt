@@ -7,11 +7,14 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -75,14 +78,61 @@ enum class SvgaPriority { High, Normal, Low }
 @Stable
 data class SystemLoad(val currentFps: Int = 60)
 
-val LocalSystemLoad = staticCompositionLocalOf { mutableStateOf(SystemLoad()) }
-val LocalSvgaClock = staticCompositionLocalOf<State<Long>> { error("No clock") }
+/**
+ * 全局 SVGA 环境管理，实现自动引用计数
+ * 无需手动 SvgaProvider，当页面中有 SVGA 在播放时才启动 Choreographer 监听
+ */
+object SvgaEnvironment {
+    private var refCount = 0
+
+    val tickState = mutableLongStateOf(System.nanoTime())
+    val loadState = mutableStateOf(SystemLoad())
+
+    private var lastFpsTime = 0L
+    private var frameCount = 0
+
+    private val frameCallback = object : android.view.Choreographer.FrameCallback {
+        override fun doFrame(frameTimeNanos: Long) {
+            if (refCount <= 0) return
+
+            tickState.longValue = frameTimeNanos
+
+            // FPS 统计逻辑 (用于自适应降频)
+            frameCount++
+            if (lastFpsTime == 0L) lastFpsTime = frameTimeNanos
+            if (frameTimeNanos - lastFpsTime >= 1_000_000_000L) {
+                loadState.value = SystemLoad(currentFps = frameCount)
+                frameCount = 0
+                lastFpsTime = frameTimeNanos
+            }
+
+            android.view.Choreographer.getInstance().postFrameCallback(this)
+        }
+    }
+
+    fun attach() {
+        if (refCount == 0) {
+            lastFpsTime = 0L
+            frameCount = 0
+            android.view.Choreographer.getInstance().postFrameCallback(frameCallback)
+        }
+        refCount++
+    }
+
+    fun detach() {
+        refCount--
+    }
+}
+
+val LocalSystemLoad =
+    staticCompositionLocalOf<MutableState<SystemLoad>> { SvgaEnvironment.loadState }
+val LocalSvgaClock = staticCompositionLocalOf<State<Long>> { SvgaEnvironment.tickState }
 
 enum class SvgaLoadState { Loading, Success, Error }
 
 /**
  * 极致性能优化版 SvgaAnimation
- * 修复变形问题：正确处理 ContentScale 映射
+ * 支持自动时钟管理，无需手动包裹 SvgaProvider
  */
 @Composable
 fun SvgaAnimation(
@@ -107,6 +157,16 @@ fun SvgaAnimation(
     val density = LocalDensity.current
     val globalTickState = LocalSvgaClock.current
     val systemLoadState = LocalSystemLoad.current
+
+    // 自动关联全局环境 (如果使用的是默认全局 State，则自动触发引用计数)
+    DisposableEffect(globalTickState) {
+        if (globalTickState == SvgaEnvironment.tickState) {
+            SvgaEnvironment.attach()
+            onDispose { SvgaEnvironment.detach() }
+        } else {
+            onDispose { }
+        }
+    }
 
     val initialEntity = remember(model) {
         val key = com.opensource.svgaplayer.SVGACache.buildCacheKey(model.toString())
