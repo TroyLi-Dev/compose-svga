@@ -9,6 +9,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationVector1D
+import androidx.compose.animation.core.AnimationVector2D
 import androidx.compose.animation.core.VectorConverter
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -54,7 +56,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.withTransform
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
@@ -72,8 +73,8 @@ import kotlin.random.Random
 
 data class FlyingIconData(
     val url: String,
-    val anim: Animatable<Offset, androidx.compose.animation.core.AnimationVector2D>,
-    val scale: Animatable<Float, androidx.compose.animation.core.AnimationVector1D>
+    val anim: Animatable<Offset, AnimationVector2D>,
+    val scale: Animatable<Float, AnimationVector1D>
 )
 
 class MainActivity : ComponentActivity() {
@@ -83,45 +84,43 @@ class MainActivity : ComponentActivity() {
         SVGALogger.setLogEnabled(true)
         setContent {
             ComposesvgaTheme {
-                SvgaProvider {
-                    val context = LocalContext.current
-                    var isInterferenceEnabled by remember { mutableStateOf(false) }
-                    val systemLoad = LocalSystemLoad.current
-                    Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                        Box(modifier = Modifier.padding(innerPadding)) {
-                            SvgaTestScreen(
-                                pageTitle = "Compose 极致 60FPS 压测",
-                                currentFps = systemLoad.value.currentFps,
-                                onNavigateNext = {
-                                    context.startActivity(
-                                        Intent(
-                                            context,
-                                            TestActivity::class.java
-                                        )
+                val context = LocalContext.current
+                var isInterferenceEnabled by remember { mutableStateOf(false) }
+                val systemLoad = LocalSystemLoad.current
+                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+                    Box(modifier = Modifier.padding(innerPadding)) {
+                        SvgaTestScreen(
+                            pageTitle = "Compose 极致 60FPS 压测",
+                            currentFps = systemLoad.value.currentFps,
+                            onNavigateNext = {
+                                context.startActivity(
+                                    Intent(
+                                        context,
+                                        TestActivity::class.java
                                     )
-                                },
-                                onNavigateNative = {
-                                    context.startActivity(
-                                        Intent(
-                                            context,
-                                            NativeSvgaTestActivity::class.java
-                                        )
+                                )
+                            },
+                            onNavigateNative = {
+                                context.startActivity(
+                                    Intent(
+                                        context,
+                                        NativeSvgaTestActivity::class.java
                                     )
-                                },
-                                isInterferenceEnabled = isInterferenceEnabled,
-                                onFpsUpdated = {
-                                    systemLoad.value = systemLoad.value.copy(currentFps = it)
-                                }
-                            )
+                                )
+                            },
+                            isInterferenceEnabled = isInterferenceEnabled,
+                            onFpsUpdated = {
+                                systemLoad.value = systemLoad.value.copy(currentFps = it)
+                            }
+                        )
 
-                            PerformanceDashboard(
-                                isInterferenceEnabled = isInterferenceEnabled,
-                                onToggleInterference = { isInterferenceEnabled = it },
-                                onFpsUpdate = {
-                                    systemLoad.value = systemLoad.value.copy(currentFps = it)
-                                }
-                            )
-                        }
+                        PerformanceDashboard(
+                            isInterferenceEnabled = isInterferenceEnabled,
+                            onToggleInterference = { isInterferenceEnabled = it },
+                            onFpsUpdate = {
+                                systemLoad.value = systemLoad.value.copy(currentFps = it)
+                            }
+                        )
                     }
                 }
             }
@@ -138,7 +137,7 @@ fun PerformanceDashboard(
     var memoryInfo by remember { mutableStateOf("") }
     var cpuInfo by remember { mutableStateOf("CPU: 0%") }
     var fps by remember { mutableIntStateOf(0) }
-
+    val systemLoad = LocalSystemLoad.current
     LaunchedEffect(Unit) {
         var lastCpuTime = Process.getElapsedCpuTime()
         var lastTime = System.currentTimeMillis()
@@ -195,7 +194,7 @@ fun PerformanceDashboard(
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = "FPS: $fps",
+                        text = "FPS: $fps  systemLoad FPS : ${systemLoad.value.currentFps}",
                         color = if (fps > 45) Color.Green else if (fps > 20) Color.Yellow else Color.Red,
                         fontWeight = FontWeight.ExtraBold,
                         fontSize = 16.sp
@@ -239,12 +238,7 @@ fun SvgaTestScreen(
 ) {
     val context = LocalContext.current
     val svgaUrls = remember {
-        listOf(
-            "https://d2180mnhafnhva.cloudfront.net/05213178614dfb7b0bdd9d19f82c9f5d.svga",
-            "https://d2180mnhafnhva.cloudfront.net/IMNR0BjLFm0GCGtK27QzT9qRZCZjaoQp.svga",
-            "https://img.chatie.live/app%2Fcard%2Fani_profilecard_aristocracy_lv1.svga",
-            "https://d2180mnhafnhva.cloudfront.net/QmDvo89m0jJt2ctcqJwl8EZdCP9Pu2qD.svga"
-        )
+        AppConstants.svgaUrls
     }
 
     val iconUrls = remember {
@@ -359,13 +353,9 @@ fun SvgaTestScreen(
                         .background(Color.LightGray.copy(0.1f))
                         .onGloballyPositioned { coords ->
                             if (index < 50) {
-                                val windowPos = coords.positionInWindow()
-                                gridItemPositions[index] = Offset(
-                                    windowPos.x + coords.size.width / 2f,
-                                    windowPos.y + coords.size.height / 2f
-                                )
+                                gridItemPositions[index] = coords.positionInWindow()
                             }
-                        },
+                        }
                 )
             }
         }
@@ -373,72 +363,69 @@ fun SvgaTestScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp)
-                .onGloballyPositioned { coords ->
-                    val windowPos = coords.positionInWindow()
-                    buttonCenter = Offset(
-                        windowPos.x + coords.size.width / 2f,
-                        windowPos.y + coords.size.height / 2f
-                    )
-                },
+                .height(80.dp)
+                .padding(16.dp),
             contentAlignment = Alignment.Center
         ) {
             Button(
                 onClick = {
                     scope.launch {
-                        for (i in 0 until 50) {
-                            val targetPos = gridItemPositions[i] ?: continue
-                            val url = iconUrls.random()
+                        repeat(15) {
+                            val startIdx = Random.nextInt(0, 50)
+                            val startPos = gridItemPositions[startIdx] ?: Offset.Zero
+                            val iconUrl = iconUrls.random()
+
+                            val anim = Animatable(startPos, Offset.VectorConverter)
+                            val scale = Animatable(0.5f)
+
+                            val data = FlyingIconData(iconUrl, anim, scale)
+                            flyingData.add(data)
+
                             launch {
-                                val anim = Animatable(buttonCenter, Offset.VectorConverter)
-                                val scale = Animatable(1f)
-                                val data = FlyingIconData(url, anim, scale)
-                                flyingData.add(data)
-                                delay(i * 15L)
                                 launch {
                                     anim.animateTo(
-                                        targetPos,
-                                        tween(600 + Random.nextInt(400))
+                                        targetValue = buttonCenter,
+                                        animationSpec = tween(800)
                                     )
                                 }
-                                launch { scale.animateTo(0.5f, tween(800)) }
-                                delay(1200); flyingData.remove(data)
+                                launch {
+                                    scale.animateTo(1.2f, tween(400))
+                                    scale.animateTo(0.8f, tween(400))
+                                }
+                                delay(800)
+                                flyingData.remove(data)
                             }
+                            delay(50)
                         }
                     }
                 },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(50.dp)
-                    .padding(horizontal = 32.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.7f))
-            ) { Text("点击触发飞行 🚀", color = Color.White) }
-
-            SvgaAnimation(
-                model = "https://d2180mnhafnhva.cloudfront.net/05213178614dfb7b0bdd9d19f82c9f5d.svga",
-                priority = SvgaPriority.Normal,
-                dynamicEntity = testDynamicEntity,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(80.dp),
-                contentScale = ContentScale.FillHeight
-            )
+                    .onGloballyPositioned { coords ->
+                        val pos = coords.positionInWindow()
+                        buttonCenter = Offset(
+                            pos.x + coords.size.width / 2,
+                            pos.y + coords.size.height / 2
+                        )
+                    },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6200EE))
+            ) {
+                Text("触发 30 个并行动画 (渲染压力测试)")
+            }
         }
     }
 
     Canvas(modifier = Modifier.fillMaxSize()) {
         flyingData.forEach { data ->
-            preloadedBitmaps[data.url]?.let { bitmap ->
+            preloadedBitmaps[data.url]?.let { bmp ->
                 withTransform({
                     translate(
-                        data.anim.value.x,
-                        data.anim.value.y
-                    ); scale(data.scale.value, data.scale.value, pivot = Offset.Zero)
-                }) {
-                    drawImage(
-                        image = bitmap.asImageBitmap(),
-                        topLeft = Offset(-bitmap.width / 2f, -bitmap.height / 2f)
+                        data.anim.value.x - (bmp.width * data.scale.value) / 2,
+                        data.anim.value.y - (bmp.height * data.scale.value) / 2
                     )
+                    scale(data.scale.value, data.scale.value, Offset.Zero)
+                }) {
+                    drawImage(bmp.asImageBitmap())
                 }
             }
         }
