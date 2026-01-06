@@ -82,33 +82,71 @@ class SVGAParser(context: Context?, val needCutBitmap: Boolean = false) {
     ): (() -> Unit)? {
         if (mContext == null) return null
         val cacheKey = SVGACache.buildCacheKey(url)
+        
+        // 1. 内存缓存同步检查
         val cachedEntity = SVGAActivitiesCache.instance.get(cacheKey)
         if (cachedEntity != null) {
-            handler.post { callback?.onComplete(cachedEntity) }
+            callback?.onComplete(cachedEntity)
             return null
         }
 
+        // 2. 任务合并与取消逻辑封装
         synchronized(ongoingTasks) {
             val list = ongoingTasks[cacheKey]
             if (list != null) {
                 callback?.let { list.add(it) }
-                return null
+                return {
+                    synchronized(ongoingTasks) {
+                        ongoingTasks[cacheKey]?.remove(callback)
+                    }
+                }
             }
-            ongoingTasks[cacheKey] =
-                mutableListOf<ParseCompletion>().apply { callback?.let { add(it) } }
+            ongoingTasks[cacheKey] = mutableListOf<ParseCompletion>().apply { callback?.let { add(it) } }
         }
 
-        return FileDownloader().resume(url, { inputStream ->
-            decodeFromInputStream(inputStream, cacheKey, object : ParseCompletion {
-                override fun onComplete(videoItem: SVGAVideoEntity) {
-                    notifyResult(cacheKey, videoItem, null)
-                }
+        // 3. 内部统一结果分发器
+        val internalCallback = object : ParseCompletion {
+            override fun onComplete(videoItem: SVGAVideoEntity) = notifyResult(cacheKey, videoItem, null)
+            override fun onError(e: Exception, alias: String) = notifyResult(cacheKey, null, e)
+        }
 
-                override fun onError(e: Exception, alias: String) {
-                    notifyResult(cacheKey, null, e)
+        // 4. 磁盘预检 + 失败回退机制
+        val cacheDir = SVGACache.buildCacheDir(cacheKey)
+        var cancelAction: (() -> Unit)? = null
+
+        if (cacheDir.exists() && !cacheDir.listFiles().isNullOrEmpty()) {
+            threadPoolExecutor.execute {
+                try {
+                    decodeFromCacheDir(cacheDir, cacheKey, object : ParseCompletion {
+                        override fun onComplete(videoItem: SVGAVideoEntity) = internalCallback.onComplete(videoItem)
+                        override fun onError(e: Exception, alias: String) {
+                            cancelAction = startNetworkDecodeInternal(url, cacheKey, internalCallback, playCallback)
+                        }
+                    }, url.toString())
+                } catch (e: Exception) {
+                    cancelAction = startNetworkDecodeInternal(url, cacheKey, internalCallback, playCallback)
                 }
-            }, false, playCallback, url.toString())
-        }, { e -> notifyResult(cacheKey, null, e) })
+            }
+        } else {
+            cancelAction = startNetworkDecodeInternal(url, cacheKey, internalCallback, playCallback)
+        }
+
+        return {
+            synchronized(ongoingTasks) {
+                val list = ongoingTasks[cacheKey]
+                list?.remove(callback)
+                if (list.isNullOrEmpty()) {
+                    ongoingTasks.remove(cacheKey)
+                    cancelAction?.invoke()
+                }
+            }
+        }
+    }
+
+    private fun startNetworkDecodeInternal(url: URL, cacheKey: String, callback: ParseCompletion, playCallback: PlayCallback?): (() -> Unit)? {
+        return FileDownloader().resume(url, { inputStream ->
+            decodeFromInputStream(inputStream, cacheKey, callback, false, playCallback, url.toString())
+        }, { e -> callback.onError(e, url.toString()) })
     }
 
     private fun notifyResult(cacheKey: String, entity: SVGAVideoEntity?, e: Exception?) {
@@ -125,9 +163,15 @@ class SVGAParser(context: Context?, val needCutBitmap: Boolean = false) {
         name: String,
         callback: ParseCompletion?,
         playCallback: PlayCallback? = null
-    ) {
+    ): (() -> Unit)? {
         val cacheKey = SVGACache.buildCacheKey("file:///assets/$name")
-        threadPoolExecutor.execute {
+        val cachedEntity = SVGAActivitiesCache.instance.get(cacheKey)
+        if (cachedEntity != null) {
+            callback?.onComplete(cachedEntity)
+            return null
+        }
+
+        val future = threadPoolExecutor.submit {
             try {
                 mContext?.assets?.open(name)?.let {
                     decodeFromInputStream(it, cacheKey, callback, true, playCallback, name)
@@ -136,6 +180,7 @@ class SVGAParser(context: Context?, val needCutBitmap: Boolean = false) {
                 handler.post { callback?.onError(e, name) }
             }
         }
+        return { future.cancel(true) }
     }
 
     fun decodeFromInputStream(
@@ -206,7 +251,6 @@ class SVGAParser(context: Context?, val needCutBitmap: Boolean = false) {
             var entry = zis.nextEntry
             while (entry != null) {
                 val file = File(cacheDir, entry.name)
-                // 修复：Zip Slip 漏洞防御
                 if (!file.canonicalPath.startsWith(canonicalDestPath)) {
                     throw SecurityException("Zip Slip attempt: ${entry.name}")
                 }
