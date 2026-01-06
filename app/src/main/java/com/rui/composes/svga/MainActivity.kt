@@ -42,14 +42,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -66,6 +64,8 @@ import coil.ImageLoader
 import coil.request.ImageRequest
 import com.opensource.svgaplayer.SVGADynamicEntity
 import com.opensource.svgaplayer.utils.log.SVGALogger
+import com.rui.composes.svga.core.LocalSystemLoad
+import com.rui.composes.svga.model.SvgaPriority
 import com.rui.composes.svga.ui.theme.ComposesvgaTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -86,12 +86,10 @@ class MainActivity : ComponentActivity() {
             ComposesvgaTheme {
                 val context = LocalContext.current
                 var isInterferenceEnabled by remember { mutableStateOf(false) }
-                val systemLoad = LocalSystemLoad.current
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                     Box(modifier = Modifier.padding(innerPadding)) {
                         SvgaTestScreen(
                             pageTitle = "Compose 极致 60FPS 压测",
-                            currentFps = systemLoad.value.currentFps,
                             onNavigateNext = {
                                 context.startActivity(
                                     Intent(
@@ -107,19 +105,12 @@ class MainActivity : ComponentActivity() {
                                         NativeSvgaTestActivity::class.java
                                     )
                                 )
-                            },
-                            isInterferenceEnabled = isInterferenceEnabled,
-                            onFpsUpdated = {
-                                systemLoad.value = systemLoad.value.copy(currentFps = it)
                             }
                         )
 
                         PerformanceDashboard(
                             isInterferenceEnabled = isInterferenceEnabled,
                             onToggleInterference = { isInterferenceEnabled = it },
-                            onFpsUpdate = {
-                                systemLoad.value = systemLoad.value.copy(currentFps = it)
-                            }
                         )
                     }
                 }
@@ -132,11 +123,9 @@ class MainActivity : ComponentActivity() {
 fun PerformanceDashboard(
     isInterferenceEnabled: Boolean,
     onToggleInterference: (Boolean) -> Unit,
-    onFpsUpdate: (Int) -> Unit
 ) {
     var memoryInfo by remember { mutableStateOf("") }
     var cpuInfo by remember { mutableStateOf("CPU: 0%") }
-    var fps by remember { mutableIntStateOf(0) }
     val systemLoad = LocalSystemLoad.current
     LaunchedEffect(Unit) {
         var lastCpuTime = Process.getElapsedCpuTime()
@@ -163,21 +152,6 @@ fun PerformanceDashboard(
         }
     }
 
-    LaunchedEffect(Unit) {
-        var frameCount = 0;
-        var lastTime = System.nanoTime()
-        while (true) {
-            withFrameNanos {
-                frameCount++
-                val currentTime = System.nanoTime()
-                if (currentTime - lastTime >= 1_000_000_000L) {
-                    fps = frameCount
-                    onFpsUpdate(fps) // 通知全局
-                    frameCount = 0; lastTime = currentTime
-                }
-            }
-        }
-    }
 
     Column(
         modifier = Modifier
@@ -194,8 +168,8 @@ fun PerformanceDashboard(
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = "FPS: $fps  systemLoad FPS : ${systemLoad.value.currentFps}",
-                        color = if (fps > 45) Color.Green else if (fps > 20) Color.Yellow else Color.Red,
+                        text = "FPS: ${systemLoad.value.currentFps}",
+                        color = if (systemLoad.value.currentFps > 45) Color.Green else if (systemLoad.value.currentFps > 20) Color.Yellow else Color.Red,
                         fontWeight = FontWeight.ExtraBold,
                         fontSize = 16.sp
                     )
@@ -230,11 +204,8 @@ fun PerformanceDashboard(
 @Composable
 fun SvgaTestScreen(
     pageTitle: String,
-    currentFps: Int,
     onNavigateNext: () -> Unit,
     onNavigateNative: () -> Unit,
-    isInterferenceEnabled: Boolean,
-    onFpsUpdated: (Int) -> Unit
 ) {
     val context = LocalContext.current
     val svgaUrls = remember {

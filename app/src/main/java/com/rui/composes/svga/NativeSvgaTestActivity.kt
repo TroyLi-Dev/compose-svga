@@ -46,12 +46,7 @@ import kotlin.random.Random
 
 class NativeSvgaTestActivity : ComponentActivity() {
 
-    private val svgaUrls = listOf(
-        "https://d2180mnhafnhva.cloudfront.net/05213178614dfb7b0bdd9d19f82c9f5d.svga",
-        "https://d2180mnhafnhva.cloudfront.net/IMNR0BjLFm0GCGtK27QzT9qRZCZjaoQp.svga",
-        "https://img.chatie.live/app%2Fcard%2Fani_profilecard_aristocracy_lv1.svga",
-        "https://d2180mnhafnhva.cloudfront.net/QmDvo89m0jJt2ctcqJwl8EZdCP9Pu2qD.svga"
-    )
+    private val svgaUrls = AppConstants.svgaUrls
 
     private val iconUrls = listOf(
         "https://d2180mnhafnhva.cloudfront.net/7e38463dba12e58d71eb947bb7118cce.png",
