@@ -6,6 +6,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.os.Build
 import android.util.AttributeSet
+import android.util.Log
 import android.view.MotionEvent
 import android.view.View
 import android.view.animation.LinearInterpolator
@@ -26,6 +27,7 @@ open class SVGAImageView @JvmOverloads constructor(
 
     private var svgaDrawble: SVGADrawable? = null
     private val TAG = "SVGAImageView"
+    private var currentParseTask: (() -> Unit)? = null
 
     enum class FillMode {
         Backward,
@@ -99,10 +101,17 @@ open class SVGAImageView @JvmOverloads constructor(
     private fun parserSource(source: String) {
         val refImgView = WeakReference(this)
         val parser = SVGAParser(context)
+        currentParseTask?.invoke()
+        currentParseTask = null
         if (source.startsWith("http://") || source.startsWith("https://")) {
-            parser.decodeFromURL(URL(source), createParseCompletion(refImgView))
+            try {
+                val url = URL(source)
+                currentParseTask = parser.decodeFromURL(url, createParseCompletion(refImgView))
+            } catch (e: Exception) {
+                Log.e(TAG, "Invalid URL: $source", e)
+            }
         } else {
-            parser.decodeFromAssets(source, createParseCompletion(refImgView))
+            currentParseTask = parser.decodeFromAssets(source, createParseCompletion(refImgView))
         }
     }
 
@@ -139,15 +148,19 @@ open class SVGAImageView @JvmOverloads constructor(
     private fun play(range: SVGARange?, reverse: Boolean) {
         val drawable = getSVGADrawable() ?: return
         setupDrawable()
-        mStartFrame = Math.max(0, range?.location ?: 0)
         val videoItem = drawable.videoItem
+        if (videoItem.frames <= 0) return
+
+        mStartFrame = Math.max(0, range?.location ?: 0)
         mEndFrame = Math.min(
             videoItem.frames - 1,
             ((range?.location ?: 0) + (range?.length ?: Int.MAX_VALUE) - 1)
         )
+        if (mStartFrame > mEndFrame) return
+
         val animator = ValueAnimator.ofInt(mStartFrame, mEndFrame)
         animator.interpolator = LinearInterpolator()
-        var fps = videoItem.FPS
+        var fps = Math.max(1, videoItem.FPS)
         if (forceLowFPS) {
             fps = LOW_FPS_NUM
         }
@@ -180,7 +193,10 @@ open class SVGAImageView @JvmOverloads constructor(
         try {
             val animatorClass = Class.forName("android.animation.ValueAnimator") ?: return scale
             val getMethod = animatorClass.getDeclaredMethod("getDurationScale") ?: return scale
-            scale = (getMethod.invoke(animatorClass) as Float).toDouble()
+            val scaleObj = getMethod.invoke(animatorClass)
+            if (scaleObj is Float) {
+                scale = scaleObj.toDouble()
+            }
             if (scale == 0.0) {
                 val setMethod =
                     animatorClass.getDeclaredMethod("setDurationScale", Float::class.java)
@@ -197,8 +213,10 @@ open class SVGAImageView @JvmOverloads constructor(
     private fun onAnimatorUpdate(animator: ValueAnimator?) {
         val drawable = getSVGADrawable() ?: return
         drawable.currentFrame = animator?.animatedValue as Int
-        val percentage =
-            (drawable.currentFrame + 1).toDouble() / drawable.videoItem.frames.toDouble()
+        val totalFrames = drawable.videoItem.frames
+        val percentage = if (totalFrames > 0) {
+            (drawable.currentFrame + 1).toDouble() / totalFrames.toDouble()
+        } else 0.0
         callback?.onStep(drawable.currentFrame, percentage)
     }
 
@@ -330,6 +348,8 @@ open class SVGAImageView @JvmOverloads constructor(
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
+        currentParseTask?.invoke()
+        currentParseTask = null
         stopAnimation(clearsAfterDetached)
         if (clearsAfterDetached) {
             clear()
@@ -379,6 +399,8 @@ open class SVGAImageView @JvmOverloads constructor(
 
 
     fun resetit() {
+        currentParseTask?.invoke()
+        currentParseTask = null
         clear()
         isAnimating = false
         loops = 0
