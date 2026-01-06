@@ -12,7 +12,6 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
@@ -130,42 +129,41 @@ fun SvgaAnimation(
         }
     }
 
-    // 性能优化：按需驱动重绘逻辑
     val lastFrameRef = remember(model) { object { var value = -2 } }
     var drawFrameIndex by remember { mutableIntStateOf(0) }
     
-    LaunchedEffect(videoEntity, isStop, priority, loops, maxFps) {
-        val entity = videoEntity ?: return@LaunchedEffect
-        if (isStop) return@LaunchedEffect
+    // 极致性能重构：使用中心化 Tick 监听，完全跳过协程调度
+    DisposableEffect(videoEntity, isStop, priority, loops, maxFps) {
+        val entity = videoEntity ?: return@DisposableEffect onDispose {}
+        if (isStop) return@DisposableEffect onDispose {}
 
-        snapshotFlow { globalTick.value }.collect { tick ->
-            val elapsed = tick - startTime
-            val baseFps = min(if (entity.FPS > 0) entity.FPS else 30, maxFps)
-            
-            // 响应用户需求的优先级逻辑
-            val targetFps = when (priority) {
-                SvgaPriority.High -> baseFps
-                SvgaPriority.Normal -> {
-                    // Normal 优先级在负载高时允许降频
-                    if (systemLoad.value.currentFps < 48) baseFps / 2 else baseFps
+        val tickListener = object : SvgaEnvironment.TickListener {
+            override fun onTick(frameTimeNanos: Long) {
+                val elapsed = frameTimeNanos - startTime
+                val baseFps = min(if (entity.FPS > 0) entity.FPS else 30, maxFps)
+                
+                // 优先级逻辑：High 强制全速，Normal 根据负载动态降频
+                val targetFps = when (priority) {
+                    SvgaPriority.High -> baseFps
+                    SvgaPriority.Normal -> if (systemLoad.value.currentFps < 48) baseFps / 2 else baseFps
+                    SvgaPriority.Low -> baseFps / 2
+                }.coerceAtMost(maxFps).coerceAtLeast(1)
+
+                val frameDuration = 1_000_000_000L / targetFps
+                val currentFrame = if (loops > 0 && (elapsed / (frameDuration * entity.frames)) >= loops.toLong()) -1
+                else ((elapsed / frameDuration) % entity.frames).toInt()
+
+                if (currentFrame != lastFrameRef.value) {
+                    lastFrameRef.value = currentFrame
+                    drawFrameIndex = currentFrame // 触发 Canvas 重绘
+                    if (currentFrame == -1) onFinished()
+                    else if (currentFrame >= 0) onStep(currentFrame, currentFrame.toDouble() / entity.frames)
                 }
-                SvgaPriority.Low -> baseFps / 2
-            }.coerceAtMost(maxFps).coerceAtLeast(1)
-
-            val frameDuration = 1_000_000_000L / targetFps
-            val totalDuration = frameDuration * entity.frames
-            val loopCount = elapsed / totalDuration
-            
-            val currentFrame = if (loops > 0 && loopCount >= loops.toLong()) -1
-            else ((elapsed / frameDuration) % entity.frames).toInt()
-
-            if (currentFrame != lastFrameRef.value) {
-                lastFrameRef.value = currentFrame
-                drawFrameIndex = currentFrame // 仅在帧改变时触发 Canvas 重绘
-                if (currentFrame == -1) onFinished()
-                else if (currentFrame >= 0) onStep(currentFrame, currentFrame.toDouble() / entity.frames)
             }
         }
+        
+        SvgaEnvironment.addListener(tickListener)
+        onDispose { SvgaEnvironment.removeListener(tickListener) }
     }
 
     Box(
@@ -176,8 +174,6 @@ fun SvgaAnimation(
         if (loadState == SvgaLoadState.Error) failure?.invoke()
 
         if (videoEntity != null) {
-            // 核心优化：不再直接读取 globalTick.value。
-            // Canvas 现在仅观察 drawFrameIndex，刷新率由动画自身的 FPS 决定。
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val drawerObj = drawer ?: return@Canvas
                 if (drawFrameIndex >= 0) {
