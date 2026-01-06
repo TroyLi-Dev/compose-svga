@@ -8,9 +8,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
@@ -52,6 +54,7 @@ fun SvgaAnimation(
     dynamicEntity: SVGADynamicEntity? = null,
     isStop: Boolean = false,
     contentScale: ContentScale = ContentScale.Fit,
+    onLoading: () -> Unit = {},
     onPlay: () -> Unit = {},
     onSuccess: (SVGAVideoEntity) -> Unit = {},
     onError: (Throwable) -> Unit = {},
@@ -65,7 +68,6 @@ fun SvgaAnimation(
     val systemLoad = LocalSystemLoad.current
     var componentSize by remember { mutableStateOf(IntSize.Zero) }
 
-    // 环境绑定
     DisposableEffect(globalTick) {
         if (globalTick == SvgaEnvironment.tickState) {
             SvgaEnvironment.attach()
@@ -73,7 +75,6 @@ fun SvgaAnimation(
         } else onDispose {}
     }
 
-    // 资源同步/异步加载
     val initialEntity = remember(model) {
         val key = SVGACache.buildCacheKey(model.toString())
         SVGAActivitiesCache.instance.get(key)
@@ -84,7 +85,13 @@ fun SvgaAnimation(
     }
 
     LaunchedEffect(model, componentSize) {
-        if (componentSize.width <= 0 || videoEntity != null) return@LaunchedEffect
+        if (componentSize.width <= 0 || videoEntity != null) {
+            if (videoEntity != null && loadState == SvgaLoadState.Success) {
+                onSuccess(videoEntity!!); onPlay()
+            }
+            return@LaunchedEffect
+        }
+        onLoading()
         delay(Random.nextLong(10, 100)); yield()
         try {
             val entity = suspendCancellableCoroutine<SVGAVideoEntity> { continuation ->
@@ -123,6 +130,44 @@ fun SvgaAnimation(
         }
     }
 
+    // 性能优化：按需驱动重绘逻辑
+    val lastFrameRef = remember(model) { object { var value = -2 } }
+    var drawFrameIndex by remember { mutableIntStateOf(0) }
+    
+    LaunchedEffect(videoEntity, isStop, priority, loops, maxFps) {
+        val entity = videoEntity ?: return@LaunchedEffect
+        if (isStop) return@LaunchedEffect
+
+        snapshotFlow { globalTick.value }.collect { tick ->
+            val elapsed = tick - startTime
+            val baseFps = min(if (entity.FPS > 0) entity.FPS else 30, maxFps)
+            
+            // 响应用户需求的优先级逻辑
+            val targetFps = when (priority) {
+                SvgaPriority.High -> baseFps
+                SvgaPriority.Normal -> {
+                    // Normal 优先级在负载高时允许降频
+                    if (systemLoad.value.currentFps < 48) baseFps / 2 else baseFps
+                }
+                SvgaPriority.Low -> baseFps / 2
+            }.coerceAtMost(maxFps).coerceAtLeast(1)
+
+            val frameDuration = 1_000_000_000L / targetFps
+            val totalDuration = frameDuration * entity.frames
+            val loopCount = elapsed / totalDuration
+            
+            val currentFrame = if (loops > 0 && loopCount >= loops.toLong()) -1
+            else ((elapsed / frameDuration) % entity.frames).toInt()
+
+            if (currentFrame != lastFrameRef.value) {
+                lastFrameRef.value = currentFrame
+                drawFrameIndex = currentFrame // 仅在帧改变时触发 Canvas 重绘
+                if (currentFrame == -1) onFinished()
+                else if (currentFrame >= 0) onStep(currentFrame, currentFrame.toDouble() / entity.frames)
+            }
+        }
+    }
+
     Box(
         modifier = modifier.onSizeChanged { componentSize = it },
         contentAlignment = Alignment.Center
@@ -131,28 +176,13 @@ fun SvgaAnimation(
         if (loadState == SvgaLoadState.Error) failure?.invoke()
 
         if (videoEntity != null) {
+            // 核心优化：不再直接读取 globalTick.value。
+            // Canvas 现在仅观察 drawFrameIndex，刷新率由动画自身的 FPS 决定。
             Canvas(modifier = Modifier.fillMaxSize()) {
-                val entity = videoEntity ?: return@Canvas
                 val drawerObj = drawer ?: return@Canvas
-
-                // 核心性能修复：在 DrawScope 内部读取 globalTick.value
-                // 这将使动画刷新仅触发绘制阶段，跳过重组阶段
-                val elapsed = globalTick.value - startTime
-                val baseFps = min(if (entity.FPS > 0) entity.FPS else 30, maxFps)
-                val targetFps = when (priority) {
-                    SvgaPriority.High -> baseFps
-                    SvgaPriority.Normal -> if (systemLoad.value.currentFps < 45) baseFps / 2 else baseFps
-                    SvgaPriority.Low -> if (systemLoad.value.currentFps < 40) baseFps / 4 else baseFps / 2
-                }.coerceAtLeast(1)
-
-                val frameDuration = 1_000_000_000L / targetFps
-                val loopCount = elapsed / (frameDuration * entity.frames)
-                val frameIndex = if (loops > 0 && loopCount >= loops.toLong()) -1
-                else ((elapsed / frameDuration) % entity.frames).toInt()
-
-                if (frameIndex >= 0) {
+                if (drawFrameIndex >= 0) {
                     drawIntoCanvas { canvas ->
-                        drawerObj.drawFrame(canvas.nativeCanvas, frameIndex, nativeScaleType)
+                        drawerObj.drawFrame(canvas.nativeCanvas, drawFrameIndex, nativeScaleType)
                     }
                 }
             }
