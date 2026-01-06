@@ -47,8 +47,6 @@ class SVGAParser(context: Context?, val needCutBitmap: Boolean = false) {
 
     companion object {
         private val ongoingTasks = ConcurrentHashMap<String, MutableList<ParseCompletion>>()
-
-        // 文件级别同步锁映射，防止并发解压冲突
         private val fileLocks = ConcurrentHashMap<String, Any>()
         val threadNum = AtomicInteger(0)
 
@@ -148,8 +146,6 @@ class SVGAParser(context: Context?, val needCutBitmap: Boolean = false) {
             try {
                 val bytes = inputStream.readBytes()
                 val cacheDir = SVGACache.buildCacheDir(cacheKey)
-
-                // 关键：基于文件的同步锁，解决并发解压导致的 unimplemented 错误
                 val lock = fileLocks.getOrPut(cacheKey) { Any() }
                 synchronized(lock) {
                     if (isZipFile(bytes)) {
@@ -182,32 +178,13 @@ class SVGAParser(context: Context?, val needCutBitmap: Boolean = false) {
         }
     }
 
-    private fun decodeFromCacheDir(
-        cacheDir: File,
-        cacheKey: String,
-        callback: ParseCompletion?,
-        alias: String?
-    ) {
+    private fun decodeFromCacheDir(cacheDir: File, cacheKey: String, callback: ParseCompletion?, alias: String?) {
         val binaryFile = File(cacheDir, "movie.binary")
         val specFile = File(cacheDir, "movie.spec")
         try {
             val entity = when {
-                binaryFile.exists() -> SVGAVideoEntity(
-                    MovieEntity.ADAPTER.decode(binaryFile.readBytes()),
-                    cacheDir,
-                    mFrameWidth,
-                    mFrameHeight,
-                    false
-                )
-
-                specFile.exists() -> SVGAVideoEntity(
-                    JSONObject(specFile.readText()),
-                    cacheDir,
-                    mFrameWidth,
-                    mFrameHeight,
-                    false
-                )
-
+                binaryFile.exists() -> SVGAVideoEntity(MovieEntity.ADAPTER.decode(binaryFile.readBytes()), cacheDir, mFrameWidth, mFrameHeight, false)
+                specFile.exists() -> SVGAVideoEntity(JSONObject(specFile.readText()), cacheDir, mFrameWidth, mFrameHeight, false)
                 else -> throw Exception("No metadata found")
             }
             entity.prepare({
@@ -224,11 +201,17 @@ class SVGAParser(context: Context?, val needCutBitmap: Boolean = false) {
 
     private fun unzip(inputStream: InputStream, cacheKey: String) {
         val cacheDir = SVGACache.buildCacheDir(cacheKey).apply { mkdirs() }
+        val canonicalDestPath = cacheDir.canonicalPath
         ZipInputStream(BufferedInputStream(inputStream)).use { zis ->
             var entry = zis.nextEntry
             while (entry != null) {
-                if (!entry.name.contains("../") && !entry.name.contains("/")) {
-                    val file = File(cacheDir, entry.name)
+                val file = File(cacheDir, entry.name)
+                // 修复：Zip Slip 漏洞防御
+                if (!file.canonicalPath.startsWith(canonicalDestPath)) {
+                    throw SecurityException("Zip Slip attempt: ${entry.name}")
+                }
+                if (!entry.isDirectory) {
+                    file.parentFile?.mkdirs()
                     FileOutputStream(file).use { fos -> zis.copyTo(fos) }
                 }
                 zis.closeEntry()
@@ -252,20 +235,13 @@ class SVGAParser(context: Context?, val needCutBitmap: Boolean = false) {
     }
 
     private class FileDownloader {
-        fun resume(
-            url: URL,
-            complete: (InputStream) -> Unit,
-            failure: (Exception) -> Unit
-        ): () -> Unit {
+        fun resume(url: URL, complete: (InputStream) -> Unit, failure: (Exception) -> Unit): () -> Unit {
             var cancelled = false
             threadPoolExecutor.execute {
                 try {
                     val conn = url.openConnection() as HttpURLConnection
                     conn.connectTimeout = 15000
-                    conn.setRequestProperty(
-                        "User-Agent",
-                        "Mozilla/5.0 (Linux; Android 10) SVGA/Compose"
-                    )
+                    conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 10) SVGA/Compose")
                     conn.connect()
                     if (!cancelled) complete(conn.inputStream)
                 } catch (e: Exception) {

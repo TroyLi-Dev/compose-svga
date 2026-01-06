@@ -32,8 +32,11 @@ import com.rui.composes.svga.model.SvgaLoadState
 import com.rui.composes.svga.model.SvgaPriority
 import com.rui.composes.svga.render.SvgaRenderEngine
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.yield
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import kotlin.math.min
 import kotlin.random.Random
 
@@ -41,7 +44,6 @@ private val GlobalStartTimes = ConcurrentHashMap<Any, Long>()
 
 /**
  * 极致性能优化版 SvgaAnimation
- * 采用多目录结构组织：model(模型), core(时钟与环境), render(渲染缓存)
  */
 @Composable
 fun SvgaAnimation(
@@ -67,7 +69,7 @@ fun SvgaAnimation(
     val systemLoad = LocalSystemLoad.current
     var componentSize by remember { mutableStateOf(IntSize.Zero) }
 
-    // 1. 环境绑定 (自动开启/关闭时钟)
+    // 1. 环境绑定
     DisposableEffect(globalTick) {
         if (globalTick == SvgaEnvironment.tickState) {
             SvgaEnvironment.attach()
@@ -75,7 +77,7 @@ fun SvgaAnimation(
         } else onDispose {}
     }
 
-    // 2. 资源加载逻辑
+    // 2. 资源加载逻辑 (修复：增加协程取消联动)
     val initialEntity = remember(model) {
         val key = com.opensource.svgaplayer.SVGACache.buildCacheKey(model.toString())
         SVGAActivitiesCache.instance.get(key)
@@ -88,19 +90,29 @@ fun SvgaAnimation(
     LaunchedEffect(model, componentSize) {
         if (componentSize.width <= 0 || videoEntity != null) return@LaunchedEffect
         delay(Random.nextLong(10, 150)); yield()
-        SVGAParser(context).apply {
-            setFrameSize(componentSize.width, componentSize.height)
-            decodeFromURL(java.net.URL(model.toString()), object : SVGAParser.ParseCompletion {
-                override fun onComplete(videoItem: SVGAVideoEntity) {
-                    videoEntity = videoItem
-                    loadState = SvgaLoadState.Success
-                    onSuccess(videoItem); onPlay()
-                }
+        
+        try {
+            val entity = suspendCancellableCoroutine<SVGAVideoEntity> { continuation ->
+                val parser = SVGAParser(context)
+                parser.setFrameSize(componentSize.width, componentSize.height)
+                val cancelTask = parser.decodeFromURL(java.net.URL(model.toString()), object : SVGAParser.ParseCompletion {
+                    override fun onComplete(videoItem: SVGAVideoEntity) {
+                        if (continuation.isActive) continuation.resume(videoItem)
+                    }
 
-                override fun onError(e: Exception, alias: String) {
-                    loadState = SvgaLoadState.Error; onError(e)
-                }
-            })
+                    override fun onError(e: Exception, alias: String) {
+                        if (continuation.isActive) continuation.resumeWithException(e)
+                    }
+                })
+                continuation.invokeOnCancellation { cancelTask?.invoke() }
+            }
+            videoEntity = entity
+            loadState = SvgaLoadState.Success
+            onSuccess(entity); onPlay()
+        } catch (e: Exception) {
+            if (e !is kotlinx.coroutines.CancellationException) {
+                loadState = SvgaLoadState.Error; onError(e)
+            }
         }
     }
 
@@ -131,14 +143,7 @@ fun SvgaAnimation(
         }
     }
 
-    // 4. 回调通知
-    LaunchedEffect(frameIndex) {
-        val entity = videoEntity ?: return@LaunchedEffect
-        if (frameIndex == -1) onFinished()
-        else if (frameIndex >= 0) onStep(frameIndex, frameIndex.toDouble() / entity.frames)
-    }
-
-    // 5. 渲染区域
+    // 4. 渲染区域
     Box(
         modifier = modifier.onSizeChanged { componentSize = it },
         contentAlignment = Alignment.Center
@@ -153,9 +158,10 @@ fun SvgaAnimation(
                 val normH = (componentSize.height + 7) and -8
                 if (normW <= 0) return@Canvas
 
-                val cacheKey = ((model.hashCode().toLong() and 0xFFFFFFFFL) shl 32) or
-                        ((frameIndex.toLong() and 0xFFFL) shl 20) or
-                        ((normW.toLong() and 0x3FFL) shl 10) or (normH.toLong() and 0x3FFL)
+                // 修复：优化 cacheKey 位分配，防止高分辨率碰撞 (model:24, frame:12, width:14, height:14)
+                val cacheKey = ((model.hashCode().toLong() and 0xFFFFFFL) shl 40) or
+                        ((frameIndex.toLong() and 0xFFFL) shl 28) or
+                        ((normW.toLong() and 0x3FFFL) shl 14) or (normH.toLong() and 0x3FFFL)
 
                 val bitmap = SvgaRenderEngine.frameCache.get(cacheKey)?.takeIf { !it.isRecycled }
                     ?: SvgaRenderEngine.renderToCache(
