@@ -42,6 +42,31 @@ import kotlin.random.Random
 
 private val GlobalStartTimes = ConcurrentHashMap<Any, Long>()
 
+/**
+ * Compose SVGA 播放组件
+ *
+ * @param model SVGA 资源路径，支持 URL 字符串
+ * @param modifier 布局修饰符
+ * @param priority 渲染优先级：[SvgaPriority.High] 强制满帧，[SvgaPriority.Normal] 根据系统负载自动降频
+ * @param maxFps 限制最高播放帧率
+ * @param allowStopOnCriticalLoad 是否允许在极端负载下停止播放
+ * @param loops 循环次数：0 为无限循环，>0 为播放指定次数
+ * @param dynamicEntity 动态实体：用于替换 SVGA 内部的文本或图片素材
+ * @param isStop 是否暂停动画
+ * @param contentScale 缩放模式，决定 SVGA 在容器内的适配方式
+ *
+ * --- 状态回调 (用于执行逻辑) ---
+ * @param onLoading 开始从网络或本地加载/解析资源时触发
+ * @param onPlay 资源准备完毕，动画开始播放第一帧时触发
+ * @param onSuccess 资源解析成功，返回解析后的视频实体对象 [SVGAVideoEntity]
+ * @param onError 资源加载或解析失败时触发，返回异常信息
+ * @param onStep 每一帧渲染时的进度回调，[frame] 为当前帧序号，[percentage] 为播放进度百分比
+ * @param onFinished 当动画非无限循环 ([loops] > 0) 且播放到最后一帧时触发
+ *
+ * --- UI 插槽 (用于显示界面) ---
+ * @param loading 加载资源过程中展示的 UI（如进度条）
+ * @param failure 资源加载失败时展示的 UI（如错误占位图）
+ */
 @Composable
 fun SvgaAnimation(
     model: Any,
