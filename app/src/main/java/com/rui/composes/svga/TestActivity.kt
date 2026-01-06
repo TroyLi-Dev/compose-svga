@@ -25,13 +25,10 @@ class TestActivity : ComponentActivity() {
             ComposesvgaTheme {
                 val context = LocalContext.current
                 var isInterferenceEnabled by remember { mutableStateOf(false) }
-                val systemLoad = LocalSystemLoad.current
-
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                     Box(modifier = Modifier.padding(innerPadding)) {
                         SvgaTestScreen(
                             pageTitle = "独立 Activity 页面",
-                            currentFps = systemLoad.value.currentFps,
                             onNavigateNext = { finish() },
                             onNavigateNative = {
                                 context.startActivity(
@@ -41,17 +38,10 @@ class TestActivity : ComponentActivity() {
                                     )
                                 )
                             },
-                            isInterferenceEnabled = isInterferenceEnabled,
-                            onFpsUpdated = {
-                                systemLoad.value = systemLoad.value.copy(currentFps = it)
-                            }
                         )
                         PerformanceDashboard(
                             isInterferenceEnabled = isInterferenceEnabled,
                             onToggleInterference = { isInterferenceEnabled = it },
-                            onFpsUpdate = {
-                                systemLoad.value = systemLoad.value.copy(currentFps = it)
-                            }
                         )
                     }
                 }
