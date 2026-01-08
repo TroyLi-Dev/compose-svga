@@ -8,7 +8,7 @@
 
 你可以在仓库中查看完整示例：  
 
- demo：[Demo 示例](app/src/main/java/com/rui/compose/svga/MainActivity.kt)
+ demo：[Demo 示例](app/src/main/java/com/rui/composes/svga/MainActivity.kt)
 
 To get a Git project into your build:
 
