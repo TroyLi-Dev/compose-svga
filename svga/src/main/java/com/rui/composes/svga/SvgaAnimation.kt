@@ -26,6 +26,7 @@ import com.opensource.svgaplayer.SVGADynamicEntity
 import com.opensource.svgaplayer.SVGAParser
 import com.opensource.svgaplayer.SVGAVideoEntity
 import com.opensource.svgaplayer.drawer.SVGACanvasDrawer
+import com.opensource.svgaplayer.utils.log.LogUtils
 import com.rui.composes.svga.core.LocalSvgaClock
 import com.rui.composes.svga.core.LocalSystemLoad
 import com.rui.composes.svga.core.SvgaEnvironment
@@ -34,6 +35,7 @@ import com.rui.composes.svga.model.SvgaPriority
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.yield
+import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -45,27 +47,43 @@ private val GlobalStartTimes = ConcurrentHashMap<Any, Long>()
 /**
  * Compose SVGA 播放组件
  *
- * @param model SVGA 资源路径，支持 URL 字符串
- * @param modifier 布局修饰符
- * @param priority 渲染优先级：[SvgaPriority.High] 强制满帧，[SvgaPriority.Normal] 根据系统负载自动降频
- * @param maxFps 限制最高播放帧率
- * @param allowStopOnCriticalLoad 是否允许在极端负载下停止播放
- * @param loops 循环次数：0 为无限循环，>0 为播放指定次数
- * @param dynamicEntity 动态实体：用于替换 SVGA 内部的文本或图片素材
- * @param isStop 是否暂停动画
- * @param contentScale 缩放模式，决定 SVGA 在容器内的适配方式
+ * 该组件提供了高性能的 SVGA 动画渲染能力，支持自动负载降频、生命周期感知以及多种资源来源。
  *
- * --- 状态回调 (用于执行逻辑) ---
- * @param onLoading 开始从网络或本地加载/解析资源时触发
- * @param onPlay 资源准备完毕，动画开始播放第一帧时触发
- * @param onSuccess 资源解析成功，返回解析后的视频实体对象 [SVGAVideoEntity]
- * @param onError 资源加载或解析失败时触发，返回异常信息
- * @param onStep 每一帧渲染时的进度回调，[frame] 为当前帧序号，[percentage] 为播放进度百分比
- * @param onFinished 当动画非无限循环 ([loops] > 0) 且播放到最后一帧时触发
+ * ### 核心特性：
+ * 1. **负载自适应**：通过 [priority] 参数，组件可在系统卡顿（FPS < 48）时自动减半渲染频率。
+ * 2. **资源类型识别**：支持 URL、Assets、本地绝对路径和 File 对象。
+ * 3. **极致性能**：基于中心化时钟 [SvgaEnvironment]，避开协程调度开销，支持数百个动画并播。
+ * 4. **生命周期安全**：自动感知 Compose 销毁并取消未完成的解析任务，防止内存泄露。
  *
- * --- UI 插槽 (用于显示界面) ---
- * @param loading 加载资源过程中展示的 UI（如进度条）
- * @param failure 资源加载失败时展示的 UI（如错误占位图）
+ * @param model SVGA 资源路径。支持：
+ *              - [String] URL: "https://example.com/test.svga"
+ *              - [String] Assets: "player/anim.svga"
+ *              - [String] 绝对路径: "/sdcard/Download/test.svga" (需权限)
+ *              - [String] File 协议: "file:///data/user/0/.../test.svga"
+ *              - [java.io.File] 对象
+ * @param modifier 布局修饰符，用于设置组件尺寸、填充、点击事件等。
+ * @param priority 渲染优先级控制：
+ *                 - [SvgaPriority.High]：始终全速渲染（通常用于主要动画）。
+ *                 - [SvgaPriority.Normal]：系统负载高时自动降频（默认，用于普通列表）。
+ *                 - [SvgaPriority.Low]：强制低频（FPS/2）运行以节省 CPU。
+ * @param maxFps 限制最高播放帧率，默认为无限制。
+ * @param allowStopOnCriticalLoad 是否允许在极端负载下（如系统严重掉帧）暂时停止动画渲染。
+ * @param loops 循环播放次数。0 为无限循环，>0 为指定次数播放完后停在最后一帧。
+ * @param dynamicEntity 动态实体，用于动态替换动画内的文本（TextPaint）或素材（Bitmap）。
+ * @param isStop 是否暂停动画。设置为 true 时，动画将冻结在当前帧。
+ * @param contentScale 缩放模式，决定动画如何适配容器尺寸（Fit, Crop, FillBounds 等）。
+ *
+ * --- 逻辑回调 ---
+ * @param onLoading 开始加载资源（下载或读取磁盘）时触发。
+ * @param onPlay 资源准备完毕，正式开始第一帧渲染时触发。
+ * @param onSuccess 资源解析成功，返回底层的 [SVGAVideoEntity] 对象。
+ * @param onError 加载或解析失败时触发，返回异常信息（如 File Not Found）。
+ * @param onStep 每一帧渲染后的进度回调。[frame] 为当前帧序号，[percentage] 为播放百分比 (0.0~1.0)。
+ * @param onFinished 当 [loops] 大于 0 且动画播放完毕时触发。
+ *
+ * --- UI 扩展插槽 ---
+ * @param loading 正在加载时展示的 Composable 视图（如转圈进度条）。
+ * @param failure 加载失败时展示的 Composable 视图（如占位图）。
  */
 @Composable
 fun SvgaAnimation(
@@ -100,7 +118,13 @@ fun SvgaAnimation(
     }
 
     val initialEntity = remember(model) {
-        val key = SVGACache.buildCacheKey(model.toString())
+        val modelStr = model.toString()
+        val key = when {
+            model is File -> SVGACache.buildCacheKey("file://${model.absolutePath}")
+            modelStr.startsWith("/") -> SVGACache.buildCacheKey("file://$modelStr")
+            modelStr.startsWith("file://") -> SVGACache.buildCacheKey(modelStr)
+            else -> SVGACache.buildCacheKey(modelStr)
+        }
         SVGAActivitiesCache.instance.get(key)
     }
     var videoEntity by remember(model) { mutableStateOf<SVGAVideoEntity?>(initialEntity) }
@@ -121,14 +145,43 @@ fun SvgaAnimation(
             val entity = suspendCancellableCoroutine<SVGAVideoEntity> { continuation ->
                 val parser = SVGAParser(context)
                 parser.setFrameSize(componentSize.width, componentSize.height)
-                val cancelTask = parser.decodeFromURL(java.net.URL(model.toString()), object : SVGAParser.ParseCompletion {
-                    override fun onComplete(videoItem: SVGAVideoEntity) {
-                        if (continuation.isActive) continuation.resume(videoItem)
+                
+                val modelStr = model.toString()
+                val cancelTask = when {
+                    model is File -> {
+                        parser.decodeFromFile(model, object : SVGAParser.ParseCompletion {
+                            override fun onComplete(videoItem: SVGAVideoEntity) = continuation.resume(videoItem)
+                            override fun onError(e: Exception, alias: String) = continuation.resumeWithException(e)
+                        })
                     }
-                    override fun onError(e: Exception, alias: String) {
-                        if (continuation.isActive) continuation.resumeWithException(e)
+                    modelStr.startsWith("/") || modelStr.startsWith("file://") -> {
+                        val path = if (modelStr.startsWith("file://")) modelStr.substring(7) else modelStr
+                        val file = File(path)
+                        if (!file.exists()) {
+                            continuation.resumeWithException(Exception("File not found at: $path"))
+                            return@suspendCancellableCoroutine
+                        }
+                        parser.decodeFromFile(file, object : SVGAParser.ParseCompletion {
+                            override fun onComplete(videoItem: SVGAVideoEntity) = continuation.resume(videoItem)
+                            override fun onError(e: Exception, alias: String) = continuation.resumeWithException(e)
+                        })
                     }
-                })
+                    modelStr.startsWith("http://") || modelStr.startsWith("https://") -> {
+                        parser.decodeFromURL(java.net.URL(modelStr), object : SVGAParser.ParseCompletion {
+                            override fun onComplete(videoItem: SVGAVideoEntity) = continuation.resume(videoItem)
+                            override fun onError(e: Exception, alias: String) = continuation.resumeWithException(e)
+                        })
+                    }
+                    else -> {
+                        parser.decodeFromAssets(modelStr, object : SVGAParser.ParseCompletion {
+                            override fun onComplete(videoItem: SVGAVideoEntity) = continuation.resume(videoItem)
+                            override fun onError(e: Exception, alias: String) {
+                                LogUtils.error("SvgaAnimation", "Asset load failed: $modelStr. Ensure file is in src/main/assets/")
+                                continuation.resumeWithException(e)
+                            }
+                        })
+                    }
+                }
                 continuation.invokeOnCancellation { cancelTask?.invoke() }
             }
             videoEntity = entity
@@ -136,6 +189,7 @@ fun SvgaAnimation(
             onSuccess(entity); onPlay()
         } catch (e: Exception) {
             if (e !is kotlinx.coroutines.CancellationException) {
+                LogUtils.error("SvgaAnimation", "Final Error: ${e.message}")
                 loadState = SvgaLoadState.Error; onError(e)
             }
         }
@@ -157,7 +211,6 @@ fun SvgaAnimation(
     val lastFrameRef = remember(model) { object { var value = -2 } }
     var drawFrameIndex by remember { mutableIntStateOf(0) }
     
-    // 极致性能重构：使用中心化 Tick 监听，完全跳过协程调度
     DisposableEffect(videoEntity, isStop, priority, loops, maxFps) {
         val entity = videoEntity ?: return@DisposableEffect onDispose {}
         if (isStop) return@DisposableEffect onDispose {}
@@ -167,7 +220,6 @@ fun SvgaAnimation(
                 val elapsed = frameTimeNanos - startTime
                 val baseFps = min(if (entity.FPS > 0) entity.FPS else 30, maxFps)
                 
-                // 优先级逻辑：High 强制全速，Normal 根据负载动态降频
                 val targetFps = when (priority) {
                     SvgaPriority.High -> baseFps
                     SvgaPriority.Normal -> if (systemLoad.value.currentFps < 48) baseFps / 2 else baseFps
@@ -180,7 +232,7 @@ fun SvgaAnimation(
 
                 if (currentFrame != lastFrameRef.value) {
                     lastFrameRef.value = currentFrame
-                    drawFrameIndex = currentFrame // 触发 Canvas 重绘
+                    drawFrameIndex = currentFrame 
                     if (currentFrame == -1) onFinished()
                     else if (currentFrame >= 0) onStep(currentFrame, currentFrame.toDouble() / entity.frames)
                 }
