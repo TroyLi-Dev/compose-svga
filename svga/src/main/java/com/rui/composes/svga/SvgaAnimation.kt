@@ -67,7 +67,6 @@ private val GlobalStartTimes = ConcurrentHashMap<Any, Long>()
  *                 - [SvgaPriority.Normal]：系统负载高时自动降频（默认，用于普通列表）。
  *                 - [SvgaPriority.Low]：强制低频（FPS/2）运行以节省 CPU。
  * @param maxFps 限制最高播放帧率，默认为无限制。
- * @param allowStopOnCriticalLoad 是否允许在极端负载下（如系统严重掉帧）暂时停止动画渲染。
  * @param loops 循环播放次数。0 为无限循环，>0 为指定次数播放完后停在最后一帧。
  * @param dynamicEntity 动态实体，用于动态替换动画内的文本（TextPaint）或素材（Bitmap）。
  * @param isStop 是否暂停动画。设置为 true 时，动画将冻结在当前帧。
@@ -91,7 +90,6 @@ fun SvgaAnimation(
     modifier: Modifier = Modifier,
     priority: SvgaPriority = SvgaPriority.Normal,
     maxFps: Int = Int.MAX_VALUE,
-    allowStopOnCriticalLoad: Boolean = false,
     loops: Int = 0,
     dynamicEntity: SVGADynamicEntity? = null,
     isStop: Boolean = false,
