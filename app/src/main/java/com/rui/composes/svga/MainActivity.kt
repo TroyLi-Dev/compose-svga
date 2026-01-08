@@ -67,8 +67,11 @@ import com.opensource.svgaplayer.utils.log.SVGALogger
 import com.rui.composes.svga.core.LocalSystemLoad
 import com.rui.composes.svga.model.SvgaPriority
 import com.rui.composes.svga.ui.theme.ComposesvgaTheme
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 import kotlin.random.Random
 
 data class FlyingIconData(
@@ -212,6 +215,13 @@ fun SvgaTestScreen(
         AppConstants.svgaUrls
     }
 
+    val assetPaths = remember {
+        listOf(
+            "player/voice_room_game_button.svga",
+            "player/voice_room_gift_panel_button.svga"
+        )
+    }
+
     val iconUrls = remember {
         listOf(
             "https://d2180mnhafnhva.cloudfront.net/7e38463dba12e58d71eb947bb7118cce.png",
@@ -227,6 +237,38 @@ fun SvgaTestScreen(
                 textSize = 40f
                 isFakeBoldText = true
             }, "banner_text")
+        }
+    }
+
+    // 用于混合展示的资源列表：包含 Assets 路径和 File 路径
+    val mixedResources = remember { mutableStateListOf<Any>() }
+    
+    LaunchedEffect(Unit) {
+        // 先添加 Assets 资源
+        mixedResources.addAll(assetPaths)
+        
+        // 将 Assets 资源复制到本地私有目录以测试 File 路径播放
+        withContext(Dispatchers.IO) {
+            assetPaths.forEach { path ->
+                try {
+                    val fileName = path.substringAfterLast("/")
+                    val targetFile = File(context.filesDir, "test_files/$fileName")
+                    if (!targetFile.exists()) {
+                        targetFile.parentFile?.mkdirs()
+                        context.assets.open(path).use { input ->
+                            targetFile.outputStream().use { output ->
+                                input.copyTo(output)
+                            }
+                        }
+                    }
+                    // 添加本地文件绝对路径到混合列表
+                    withContext(Dispatchers.Main) {
+                        mixedResources.add(targetFile.absolutePath)
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
         }
     }
 
@@ -269,6 +311,37 @@ fun SvgaTestScreen(
             }
             Button(onClick = onNavigateNext) {
                 Text(if (pageTitle.contains("Activity")) "关闭当前页" else "跳转 Activity")
+            }
+        }
+
+        Text(
+            text = "混合资源预览 (Assets & Local File)",
+            modifier = Modifier.padding(16.dp),
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium
+        )
+        LazyRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(120.dp),
+            contentPadding = PaddingValues(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            items(mixedResources) { model ->
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    SvgaAnimation(
+                        model = model,
+                        priority = SvgaPriority.High,
+                        modifier = Modifier
+                            .size(80.dp)
+                            .background(Color.LightGray.copy(0.2f))
+                    )
+                    Text(
+                        text = if (model.toString().startsWith("/")) "File" else "Asset",
+                        fontSize = 10.sp,
+                        color = Color.Gray
+                    )
+                }
             }
         }
 
