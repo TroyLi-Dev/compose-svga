@@ -34,8 +34,10 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
     private var endIndexList: Array<Boolean>? = null
     val matteSprites = mutableMapOf<String, SVGADrawerSprite>()
 
-    override fun drawFrame(canvas: Canvas, frameIndex: Int, scaleType: ImageView.ScaleType) {
-        super.drawFrame(canvas, frameIndex, scaleType)
+    override fun drawFrame(canvas: Canvas, frameIndex: Int, scaleType: ImageView.ScaleType, overrideWidth: Float?, overrideHeight: Float?) {
+        // 1. 显式调用基类 performScaleType 逻辑，确保缩放居中计算是基于 override 尺寸而非全屏
+        super.drawFrame(canvas, frameIndex, scaleType, overrideWidth, overrideHeight)
+        
         playAudio(frameIndex)
         this.pathCache.onSizeChanged(canvas)
         val sprites = requestFrameSprites(frameIndex)
@@ -172,6 +174,7 @@ internal class SVGACanvasDrawer(videoItem: SVGAVideoEntity, val dynamicItem: SVG
 
     private fun shareFrameMatrix(transform: Matrix): Matrix {
         val matrix = this.sharedValues.sharedMatrix()
+        // 这里的 scaleFx/tranFx 会使用基类计算出的结果
         matrix.postScale(scaleInfo.scaleFx, scaleInfo.scaleFy)
         matrix.postTranslate(scaleInfo.tranFx, scaleInfo.tranFy)
         matrix.preConcat(transform)

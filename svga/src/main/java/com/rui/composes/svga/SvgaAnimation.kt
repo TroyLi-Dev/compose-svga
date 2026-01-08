@@ -14,6 +14,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.layout.ContentScale
@@ -115,22 +116,24 @@ fun SvgaAnimation(
         } else onDispose {}
     }
 
-    val initialEntity = remember(model) {
+    val cacheKey = remember(model) {
         val modelStr = model.toString()
-        val key = when {
+        when {
             model is File -> SVGACache.buildCacheKey("file://${model.absolutePath}")
             modelStr.startsWith("/") -> SVGACache.buildCacheKey("file://$modelStr")
             modelStr.startsWith("file://") -> SVGACache.buildCacheKey(modelStr)
             else -> SVGACache.buildCacheKey(modelStr)
         }
-        SVGAActivitiesCache.instance.get(key)
-    }
-    var videoEntity by remember(model) { mutableStateOf<SVGAVideoEntity?>(initialEntity) }
-    var loadState by remember(model) {
-        mutableStateOf(if (initialEntity != null) SvgaLoadState.Success else SvgaLoadState.Loading)
     }
 
-    LaunchedEffect(model, componentSize) {
+    var videoEntity by remember(cacheKey) {
+        mutableStateOf(SVGAActivitiesCache.instance.get(cacheKey))
+    }
+    var loadState by remember(cacheKey) {
+        mutableStateOf(if (videoEntity != null) SvgaLoadState.Success else SvgaLoadState.Loading)
+    }
+
+    LaunchedEffect(cacheKey, componentSize) {
         if (componentSize.width <= 0 || videoEntity != null) {
             if (videoEntity != null && loadState == SvgaLoadState.Success) {
                 onSuccess(videoEntity!!); onPlay()
@@ -143,38 +146,58 @@ fun SvgaAnimation(
             val entity = suspendCancellableCoroutine<SVGAVideoEntity> { continuation ->
                 val parser = SVGAParser(context)
                 parser.setFrameSize(componentSize.width, componentSize.height)
-                
+
                 val modelStr = model.toString()
                 val cancelTask = when {
                     model is File -> {
                         parser.decodeFromFile(model, object : SVGAParser.ParseCompletion {
-                            override fun onComplete(videoItem: SVGAVideoEntity) = continuation.resume(videoItem)
-                            override fun onError(e: Exception, alias: String) = continuation.resumeWithException(e)
+                            override fun onComplete(videoItem: SVGAVideoEntity) =
+                                continuation.resume(videoItem)
+
+                            override fun onError(e: Exception, alias: String) =
+                                continuation.resumeWithException(e)
                         })
                     }
+
                     modelStr.startsWith("/") || modelStr.startsWith("file://") -> {
-                        val path = if (modelStr.startsWith("file://")) modelStr.substring(7) else modelStr
+                        val path =
+                            if (modelStr.startsWith("file://")) modelStr.substring(7) else modelStr
                         val file = File(path)
                         if (!file.exists()) {
                             continuation.resumeWithException(Exception("File not found at: $path"))
                             return@suspendCancellableCoroutine
                         }
                         parser.decodeFromFile(file, object : SVGAParser.ParseCompletion {
-                            override fun onComplete(videoItem: SVGAVideoEntity) = continuation.resume(videoItem)
-                            override fun onError(e: Exception, alias: String) = continuation.resumeWithException(e)
+                            override fun onComplete(videoItem: SVGAVideoEntity) =
+                                continuation.resume(videoItem)
+
+                            override fun onError(e: Exception, alias: String) =
+                                continuation.resumeWithException(e)
                         })
                     }
+
                     modelStr.startsWith("http://") || modelStr.startsWith("https://") -> {
-                        parser.decodeFromURL(java.net.URL(modelStr), object : SVGAParser.ParseCompletion {
-                            override fun onComplete(videoItem: SVGAVideoEntity) = continuation.resume(videoItem)
-                            override fun onError(e: Exception, alias: String) = continuation.resumeWithException(e)
-                        })
+                        parser.decodeFromURL(
+                            java.net.URL(modelStr),
+                            object : SVGAParser.ParseCompletion {
+                                override fun onComplete(videoItem: SVGAVideoEntity) =
+                                    continuation.resume(videoItem)
+
+                                override fun onError(e: Exception, alias: String) =
+                                    continuation.resumeWithException(e)
+                            })
                     }
+
                     else -> {
                         parser.decodeFromAssets(modelStr, object : SVGAParser.ParseCompletion {
-                            override fun onComplete(videoItem: SVGAVideoEntity) = continuation.resume(videoItem)
+                            override fun onComplete(videoItem: SVGAVideoEntity) =
+                                continuation.resume(videoItem)
+
                             override fun onError(e: Exception, alias: String) {
-                                LogUtils.error("SvgaAnimation", "Asset load failed: $modelStr. Ensure file is in src/main/assets/")
+                                LogUtils.error(
+                                    "SvgaAnimation",
+                                    "Asset load failed: $modelStr. Ensure file is in src/main/assets/"
+                                )
                                 continuation.resumeWithException(e)
                             }
                         })
@@ -187,13 +210,12 @@ fun SvgaAnimation(
             onSuccess(entity); onPlay()
         } catch (e: Exception) {
             if (e !is kotlinx.coroutines.CancellationException) {
-                LogUtils.error("SvgaAnimation", "Final Error: ${e.message}")
                 loadState = SvgaLoadState.Error; onError(e)
             }
         }
     }
 
-    val startTime = remember(model) { GlobalStartTimes.getOrPut(model) { System.nanoTime() } }
+    val startTime = remember(cacheKey) { GlobalStartTimes.getOrPut(cacheKey) { System.nanoTime() } }
     val drawer = remember(videoEntity, dynamicEntity) {
         videoEntity?.let { SVGACanvasDrawer(it, dynamicEntity ?: SVGADynamicEntity()) }
     }
@@ -206,9 +228,13 @@ fun SvgaAnimation(
         }
     }
 
-    val lastFrameRef = remember(model) { object { var value = -2 } }
+    val lastFrameRef = remember(cacheKey) {
+        object {
+            var value = -2
+        }
+    }
     var drawFrameIndex by remember { mutableIntStateOf(0) }
-    
+
     DisposableEffect(videoEntity, isStop, priority, loops, maxFps) {
         val entity = videoEntity ?: return@DisposableEffect onDispose {}
         if (isStop) return@DisposableEffect onDispose {}
@@ -217,7 +243,7 @@ fun SvgaAnimation(
             override fun onTick(frameTimeNanos: Long) {
                 val elapsed = frameTimeNanos - startTime
                 val baseFps = min(if (entity.FPS > 0) entity.FPS else 30, maxFps)
-                
+
                 val targetFps = when (priority) {
                     SvgaPriority.High -> baseFps
                     SvgaPriority.Normal -> if (systemLoad.value.currentFps < 48) baseFps / 2 else baseFps
@@ -225,18 +251,21 @@ fun SvgaAnimation(
                 }.coerceAtMost(maxFps).coerceAtLeast(1)
 
                 val frameDuration = 1_000_000_000L / targetFps
-                val currentFrame = if (loops > 0 && (elapsed / (frameDuration * entity.frames)) >= loops.toLong()) -1
-                else ((elapsed / frameDuration) % entity.frames).toInt()
+                val currentFrame =
+                    if (loops > 0 && (elapsed / (frameDuration * entity.frames)) >= loops.toLong()) -1
+                    else ((elapsed / frameDuration) % entity.frames).toInt()
 
                 if (currentFrame != lastFrameRef.value) {
                     lastFrameRef.value = currentFrame
-                    drawFrameIndex = currentFrame 
+                    drawFrameIndex = currentFrame
                     if (currentFrame == -1) onFinished()
-                    else if (currentFrame >= 0) onStep(currentFrame, currentFrame.toDouble() / entity.frames)
+                    else if (currentFrame >= 0) onStep(
+                        currentFrame,
+                        currentFrame.toDouble() / entity.frames
+                    )
                 }
             }
         }
-        
         SvgaEnvironment.addListener(tickListener)
         onDispose { SvgaEnvironment.removeListener(tickListener) }
     }
@@ -252,8 +281,35 @@ fun SvgaAnimation(
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val drawerObj = drawer ?: return@Canvas
                 if (drawFrameIndex >= 0) {
-                    drawIntoCanvas { canvas ->
-                        drawerObj.drawFrame(canvas.nativeCanvas, drawFrameIndex, nativeScaleType)
+                    // 强制裁剪到组件区域，防止溢出
+                    clipRect {
+                        drawIntoCanvas { canvas ->
+                            val nativeCanvas = canvas.nativeCanvas
+                            nativeCanvas.save()
+
+                            // 修正点 1：虽然 drawIntoCanvas 已经做了平移，但由于底层的 nativeCanvas 对象可能是重用的，
+                            // 且带有先前的 Matrix 变换。我们通过设置局部 clipRect 并同步 ScaleInfo 来强制归位。
+
+                            // 修正点 2：将 Compose 测量的物理尺寸强行注入给 SVGA 渲染引擎
+                            drawerObj.scaleInfo.performScaleType(
+                                size.width,
+                                size.height,
+                                videoEntity!!.videoSize.width.toFloat(),
+                                videoEntity!!.videoSize.height.toFloat(),
+                                nativeScaleType
+                            )
+
+                            // 修正点 3：调用重写后的 drawFrame，确保它只在局部视图区域绘制
+                            drawerObj.drawFrame(
+                                nativeCanvas,
+                                drawFrameIndex,
+                                nativeScaleType,
+                                size.width,
+                                size.height
+                            )
+
+                            nativeCanvas.restore()
+                        }
                     }
                 }
             }

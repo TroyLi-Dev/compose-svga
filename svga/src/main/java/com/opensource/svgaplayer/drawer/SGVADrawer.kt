@@ -1,6 +1,7 @@
 package com.opensource.svgaplayer.drawer
 
 import android.graphics.Canvas
+import android.graphics.Rect
 import android.widget.ImageView
 import com.opensource.svgaplayer.SVGAVideoEntity
 import com.opensource.svgaplayer.entities.SVGAVideoSpriteFrameEntity
@@ -15,6 +16,7 @@ import kotlin.math.max
 open internal class SGVADrawer(val videoItem: SVGAVideoEntity) {
 
     val scaleInfo = SVGAScaleInfo()
+    private val mClipRect = Rect()
 
     private val spritePool = Pools.SimplePool<SVGADrawerSprite>(max(1, videoItem.spriteList.size))
 
@@ -50,10 +52,29 @@ open internal class SGVADrawer(val videoItem: SVGAVideoEntity) {
         sprites.forEach { spritePool.release(it) }
     }
 
-    open fun drawFrame(canvas: Canvas, frameIndex: Int, scaleType: ImageView.ScaleType) {
+    /**
+     * 核心修复：增加显式宽高参数，优先于 Canvas 自带的尺寸
+     */
+    open fun drawFrame(canvas: Canvas, frameIndex: Int, scaleType: ImageView.ScaleType, overrideWidth: Float? = null, overrideHeight: Float? = null) {
+        val drawWidth: Float
+        val drawHeight: Float
+
+        if (overrideWidth != null && overrideHeight != null) {
+            drawWidth = overrideWidth
+            drawHeight = overrideHeight
+        } else {
+            if (canvas.getClipBounds(mClipRect)) {
+                drawWidth = mClipRect.width().toFloat()
+                drawHeight = mClipRect.height().toFloat()
+            } else {
+                drawWidth = canvas.width.toFloat()
+                drawHeight = canvas.height.toFloat()
+            }
+        }
+
         scaleInfo.performScaleType(
-            canvas.width.toFloat(),
-            canvas.height.toFloat(),
+            drawWidth,
+            drawHeight,
             videoItem.videoSize.width.toFloat(),
             videoItem.videoSize.height.toFloat(),
             scaleType
