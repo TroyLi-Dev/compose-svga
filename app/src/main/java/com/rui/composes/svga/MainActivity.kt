@@ -331,6 +331,7 @@ fun SvgaTestScreen(
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     SvgaAnimation(
                         model = model,
+                        loops = 1,
                         priority = SvgaPriority.High,
                         modifier = Modifier
                             .size(80.dp)
