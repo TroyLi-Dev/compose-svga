@@ -2,7 +2,6 @@
 // Source file: svga.proto at 123:1
 package com.opensource.svgaplayer.proto;
 
-import com.opensource.svgaplayer.StackOverFlowException;
 import com.squareup.wire.FieldEncoding;
 import com.squareup.wire.Message;
 import com.squareup.wire.ProtoAdapter;

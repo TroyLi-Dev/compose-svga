@@ -1,8 +1,5 @@
-import org.jetbrains.kotlin.gradle.dsl.JvmTarget
-
 plugins {
     alias(libs.plugins.android.library)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     id("maven-publish")
 }
@@ -25,9 +22,12 @@ android {
             )
         }
     }
+    publishing {
+        singleVariant("release") {}
+    }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
 }
 
@@ -44,11 +44,6 @@ publishing {
     }
 }
 
-kotlin {
-    compilerOptions {
-        jvmTarget.set(JvmTarget.JVM_11)
-    }
-}
 
 dependencies {
     implementation(libs.androidx.core.ktx)
