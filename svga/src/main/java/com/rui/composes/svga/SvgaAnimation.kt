@@ -41,6 +41,7 @@ import kotlin.coroutines.resume
 import kotlin.math.min
 import kotlin.random.Random
 import androidx.core.graphics.withSave
+import com.opensource.svgaplayer.SVGASoundManager
 
 /**
  * Compose SVGA 播放组件
@@ -68,6 +69,7 @@ import androidx.core.graphics.withSave
  * @param loops 循环播放次数。0 为无限循环，>0 为指定次数播放完后停在最后一帧。
  * @param dynamicEntity 动态实体，用于动态替换动画内的文本（TextPaint）或素材（Bitmap）。
  * @param isStop 是否暂停动画。设置为 true 时，动画将冻结在当前帧。
+ * @param isMute 是否静音动画。
  * @param contentScale 缩放模式，决定动画如何适配容器尺寸（Fit, Crop, FillBounds 等）。
  *
  * --- 逻辑回调 ---
@@ -91,6 +93,7 @@ fun SvgaAnimation(
     loops: Int = 0,
     dynamicEntity: SVGADynamicEntity? = null,
     isStop: Boolean = false,
+    isMute: Boolean = false,
     contentScale: ContentScale = ContentScale.Fit,
     onLoading: () -> Unit = {},
     onPlay: () -> Unit = {},
@@ -202,6 +205,9 @@ fun SvgaAnimation(
                     }
                 }
                 continuation.invokeOnCancellation { cancelTask?.invoke() }
+            }
+            if (isMute){
+                SVGASoundManager.setVolume(0F,entity)
             }
             videoEntity = entity
             loadState = SvgaLoadState.Success
