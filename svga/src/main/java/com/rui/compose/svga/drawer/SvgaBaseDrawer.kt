@@ -58,7 +58,9 @@ abstract class SvgaBaseDrawer(val videoItem: SvgaVideoEntity) {
             s._matteKey = null
             s._imageKey = null
             s._frameEntity = null
-            spritePool.release(s)
+            try {
+                spritePool.release(s)
+            } catch (_: Throwable) {}
         }
         if (sprites === frameSpritesList) {
             frameSpritesList.clear()

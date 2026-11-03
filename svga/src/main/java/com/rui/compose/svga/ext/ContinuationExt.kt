@@ -1,7 +1,6 @@
 package com.rui.compose.svga.ext
 
 import kotlinx.coroutines.CancellableContinuation
-import kotlin.coroutines.resumeWithException
 
 /**
  * 安全恢复协程结果（防止由于并发或取消重复调用 resume 导致的 IllegalStateException）

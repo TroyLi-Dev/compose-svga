@@ -92,29 +92,7 @@ class SvgaMemoryCalculator private constructor() {
             activityManager = appContext.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
         }
         if (deviceTotalMemory > 0L) return
-
         queryDeviceTotalRam(appContext)
-        val sp = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val cachedMem = sp.getLong(TOTAL_MEMORY_KEY, 0L)
-        val memoryInfo = ActivityManager.MemoryInfo()
-
-        if (cachedMem > 0L) {
-            deviceTotalMemory = cachedMem
-            isLowMemoryDevice = deviceTotalMemory <= lowMemoryThreshold
-            LogUtils.info(TAG, "Loaded cached total memory: $cachedMem, isLowMemoryDevice: $isLowMemoryDevice")
-            return
-        }
-
-        activityManager?.let { am ->
-            am.getMemoryInfo(memoryInfo)
-            val newTotal = memoryInfo.totalMem
-            if (newTotal > VALID_MIN_MEMORY_SIZE) {
-                sp.edit().putLong(TOTAL_MEMORY_KEY, newTotal).apply()
-                deviceTotalMemory = newTotal
-                isLowMemoryDevice = deviceTotalMemory <= lowMemoryThreshold
-            }
-            LogUtils.info(TAG, "Queried total memory: $newTotal, isLowMemoryDevice: $isLowMemoryDevice")
-        }
     }
 
     fun queryDeviceTotalRam(context: Context): Long {

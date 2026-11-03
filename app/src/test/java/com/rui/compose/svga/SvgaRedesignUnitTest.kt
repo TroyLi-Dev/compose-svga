@@ -2,6 +2,8 @@ package com.rui.compose.svga
 
 import com.rui.compose.svga.cache.SvgaDiskCache
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.security.MessageDigest
@@ -46,7 +48,7 @@ class SvgaRedesignUnitTest {
             val index = abs(key.hashCode()) and 31
             hitCounts[index]++
             val lock = segmentLocks[index]
-            assertTrue(lock != null)
+            assertNotNull(lock)
         }
 
         // 验证 32 个分段锁全部被均匀哈希命中
@@ -112,9 +114,56 @@ class SvgaRedesignUnitTest {
         com.rui.compose.svga.parser.SvgaFetcherRegistry.clear()
         com.rui.compose.svga.parser.SvgaFetcherRegistry.register(testFetcher)
         val matched = com.rui.compose.svga.parser.SvgaFetcherRegistry.findFetcher(CustomModel("cipher"))
-        assertTrue(matched != null)
+        assertNotNull(matched)
         com.rui.compose.svga.parser.SvgaFetcherRegistry.unregister(testFetcher)
         val afterUnregister = com.rui.compose.svga.parser.SvgaFetcherRegistry.findFetcher(CustomModel("cipher"))
-        assertTrue(afterUnregister == null)
+        assertNull(afterUnregister)
+    }
+
+    @Test
+    fun testDynamicEntityResetAndIsolation() {
+        val dynamic = com.rui.compose.svga.drawer.SvgaDynamicEntity()
+        var finishCalled = false
+        dynamic.setFinishListener(object : com.rui.compose.svga.drawer.SvgaDynamicEntity.ReplaceFinish {
+            override fun replaceFinish() {
+                finishCalled = true
+            }
+        })
+
+        dynamic.dynamicSize = 2
+        dynamic.loadOkSize = 1
+        assertEquals(2, dynamic.dynamicSize)
+        assertEquals(1, dynamic.loadOkSize)
+
+        dynamic.clearDynamicObjects()
+        assertEquals(0, dynamic.dynamicSize)
+        assertEquals(0, dynamic.loadOkSize)
+        assertTrue(!finishCalled)
+    }
+
+    @Test
+    fun testTrimDiskCacheExcludesAudiosDirectory() {
+        val cacheDir = SvgaDiskCache.getCacheDir()
+        val audiosDir = java.io.File(cacheDir, "audios").apply { if (!exists()) mkdirs() }
+        val dummyAudio = java.io.File(audiosDir, "test_audio.mp3").apply { writeText("audio_bytes") }
+
+        // 创建一个普通缓存目录
+        val animDir = java.io.File(cacheDir, "test_anim_dir").apply { if (!exists()) mkdirs() }
+        val dummyAnim = java.io.File(animDir, "movie.binary").apply { writeText("svga_binary_bytes") }
+
+        assertTrue(dummyAudio.exists())
+        assertTrue(dummyAnim.exists())
+
+        // 触发 trim，使用极小阈值 (1 字节)
+        SvgaDiskCache.trimDiskCache(maxBytes = 1L)
+
+        // audios 目录下的音频文件必须受到保护，绝对不可被误删
+        assertTrue("Audios file must be preserved", dummyAudio.exists())
+        assertTrue("Audios directory must be preserved", audiosDir.exists())
+
+        // 清理测试产物
+        dummyAudio.delete()
+        dummyAnim.delete()
+        animDir.delete()
     }
 }

@@ -4,7 +4,6 @@ import android.graphics.Canvas
 import android.graphics.ColorFilter
 import android.graphics.PixelFormat
 import android.graphics.drawable.Drawable
-import android.os.Build
 import android.widget.ImageView
 import com.rui.compose.svga.audio.SvgaSoundManager
 import com.rui.compose.svga.drawer.SvgaCanvasDrawer
