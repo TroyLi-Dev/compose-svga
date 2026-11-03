@@ -151,8 +151,25 @@ fun SvgaAnimation(
     var loadState by remember(cacheKey) {
         mutableStateOf(if (videoEntity != null) SvgaLoadState.Success else SvgaLoadState.Loading)
     }
+    var redrawTrigger by remember(cacheKey) { mutableIntStateOf(0) }
 
     LaunchedEffect(cacheKey) {
+        // 1. 若内存缓存已命中，直接完成复用
+        val cached = SvgaMemoryCache.instance.get(cacheKey)
+        if (cached != null) {
+            videoEntity = cached
+            loadState = SvgaLoadState.Success
+            controller?.videoEntity = cached
+            controller?.loadState = SvgaLoadState.Success
+            if (controller?.playState != SvgaPlayState.Paused && controller?.playState != SvgaPlayState.Idle) {
+                controller?.playState = SvgaPlayState.Playing
+            }
+            redrawTrigger++
+            currentOnSuccess(cached)
+            currentOnPlay()
+            return@LaunchedEffect
+        }
+
         if (videoEntity != null) {
             if (loadState == SvgaLoadState.Success) {
                 controller?.videoEntity = videoEntity
@@ -160,6 +177,7 @@ fun SvgaAnimation(
                 if (controller?.playState != SvgaPlayState.Paused && controller?.playState != SvgaPlayState.Idle) {
                     controller?.playState = SvgaPlayState.Playing
                 }
+                redrawTrigger++
                 currentOnSuccess(videoEntity!!)
                 currentOnPlay()
             }
@@ -191,6 +209,7 @@ fun SvgaAnimation(
             if (controller?.playState != SvgaPlayState.Paused && controller?.playState != SvgaPlayState.Idle) {
                 controller?.playState = SvgaPlayState.Playing
             }
+            redrawTrigger++
             currentOnSuccess(entity)
             currentOnPlay()
         } catch (e: Exception) {
@@ -281,7 +300,6 @@ fun SvgaAnimation(
     var lastTickTimeNanos by remember(cacheKey) { mutableLongStateOf(0L) }
     var lastRenderNanos by remember(cacheKey) { mutableLongStateOf(0L) }
     var isFinished by remember(cacheKey) { mutableStateOf(false) }
-    var redrawTrigger by remember(cacheKey) { mutableIntStateOf(0) }
 
     // 响应 Controller 命令控制（跳转、重播、停止、强制刷新）
     LaunchedEffect(controller?.commandTrigger, videoEntity) {

@@ -386,7 +386,7 @@ fun SvgaTestScreen(
             verticalArrangement = Arrangement.spacedBy(2.dp),
             horizontalArrangement = Arrangement.spacedBy(2.dp)
         ) {
-            itemsIndexed(items) { index, randomUrl ->
+            itemsIndexed(items, key = { index, _ -> "grid_item_$index" }) { index, randomUrl ->
                 SvgaAnimation(
                     model = randomUrl,
                     priority = SvgaPriority.Low,

@@ -356,4 +356,28 @@ class SvgaRedesignUnitTest {
         val finalAlphaFull = if (fullSpriteAlpha == 255) colorAlpha else ((colorAlpha * fullSpriteAlpha) / 255)
         assertEquals(128, finalAlphaFull)
     }
+
+    @Test
+    fun testDeflateSvgaDiskCacheDetection() {
+        val cacheKey = "deflate_cache_test_key"
+        val cacheDir = SvgaDiskCache.buildCacheDir(cacheKey)
+        try {
+            // 清理初始状态
+            cacheDir.listFiles()?.forEach { it.delete() }
+            assertTrue(!SvgaDiskCache.isCached(cacheKey))
+
+            // 写入 movie.binary 文件模拟 Protobuf SVGA 缓存
+            val binaryFile = java.io.File(cacheDir, "movie.binary")
+            binaryFile.writeBytes(byteArrayOf(0x08, 0x01, 0x12, 0x04))
+
+            // 验证 isCached 立即生效返回 true
+            assertTrue(SvgaDiskCache.isCached(cacheKey))
+
+            // 删除后再次验证
+            binaryFile.delete()
+            assertTrue(!SvgaDiskCache.isCached(cacheKey))
+        } finally {
+            cacheDir.deleteRecursively()
+        }
+    }
 }

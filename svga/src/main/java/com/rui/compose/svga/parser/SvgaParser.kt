@@ -72,7 +72,15 @@ class SvgaParser(
         )
 
         // 在途网络下载请求合并表 (SingleFlight In-Flight Merging)，彻底消灭重复网络请求与并发资源竞争
-        private val inFlightUrlTasks = ConcurrentHashMap<String, MutableList<ParseCompletion>>()
+        private class InFlightUrlTask(
+            val url: URL,
+            val cacheKey: String
+        ) {
+            val callbacks = mutableListOf<ParseCompletion>()
+            var isCompleted = false
+        }
+
+        private val inFlightUrlTasks = ConcurrentHashMap<String, InFlightUrlTask>()
         private val inFlightLock = Any()
 
         // 线上安全防范阈值：防范超大恶意流、Zip Bomb 攻击 (CWE-409)
@@ -248,56 +256,47 @@ class SvgaParser(
         handler: Handler
     ): (() -> Unit)? {
         var isFirst = false
-        val cancelled = java.util.concurrent.atomic.AtomicBoolean(false)
+        val task: InFlightUrlTask
 
         synchronized(inFlightLock) {
-            val list = inFlightUrlTasks[cacheKey]
-            if (list != null) {
-                if (callback != null) list.add(callback)
+            val existing = inFlightUrlTasks[cacheKey]
+            if (existing != null) {
+                if (callback != null) existing.callbacks.add(callback)
+                task = existing
                 isFirst = false
             } else {
-                val newList = mutableListOf<ParseCompletion>()
-                if (callback != null) newList.add(callback)
-                inFlightUrlTasks[cacheKey] = newList
+                task = InFlightUrlTask(url, cacheKey)
+                if (callback != null) task.callbacks.add(callback)
+                inFlightUrlTasks[cacheKey] = task
                 isFirst = true
             }
         }
 
         if (isFirst) {
             threadPoolExecutor.execute {
-                doDownloadUrlMerged(url, cacheKey, cancelled, handler)
+                doDownloadUrlMerged(task, handler)
             }
         }
 
         return {
             synchronized(inFlightLock) {
-                val list = inFlightUrlTasks[cacheKey]
-                if (list != null) {
-                    if (callback != null) list.remove(callback)
-                    if (list.isEmpty()) {
-                        cancelled.set(true)
-                        inFlightUrlTasks.remove(cacheKey)
-                    }
+                if (!task.isCompleted) {
+                    if (callback != null) task.callbacks.remove(callback)
                 }
             }
         }
     }
 
     private fun doDownloadUrlMerged(
-        url: URL,
-        cacheKey: String,
-        cancelled: java.util.concurrent.atomic.AtomicBoolean,
+        task: InFlightUrlTask,
         handler: Handler
     ) {
+        val url = task.url
+        val cacheKey = task.cacheKey
         val maxRetries = 2
         var lastException: Exception? = null
 
         for (attempt in 0..maxRetries) {
-            if (cancelled.get()) {
-                synchronized(inFlightLock) { inFlightUrlTasks.remove(cacheKey) }
-                return
-            }
-
             var conn: java.net.HttpURLConnection? = null
             try {
                 var currentUrl = url
@@ -365,6 +364,7 @@ class SvgaParser(
                             DecodeReason.INVALID_PROTOBUF,
                             "Inflate failed"
                         )
+                        saveBinaryAtomic(inflatedBytes, cacheDir)
                         val movieEntity = try {
                             MovieEntity.ADAPTER.decode(inflatedBytes)
                         } catch (e: Exception) {
@@ -381,12 +381,16 @@ class SvgaParser(
                 entity.cacheKey = cacheKey
                 entity.prepare({
                     SvgaMemoryCache.instance.put(cacheKey, entity)
-                    val callbacks: List<ParseCompletion>
+                    val callbacksToNotify: List<ParseCompletion>
                     synchronized(inFlightLock) {
-                        callbacks = inFlightUrlTasks.remove(cacheKey)?.toList() ?: emptyList()
+                        task.isCompleted = true
+                        if (inFlightUrlTasks[cacheKey] === task) {
+                            inFlightUrlTasks.remove(cacheKey)
+                        }
+                        callbacksToNotify = task.callbacks.toList()
                     }
                     handler.post {
-                        callbacks.forEach { it.onComplete(entity) }
+                        callbacksToNotify.forEach { it.onComplete(entity) }
                     }
                 })
                 return // 成功完成并已回调，直接返回退出重试循环！
@@ -394,7 +398,7 @@ class SvgaParser(
                 val e = if (t is Exception) t else Exception(t)
                 lastException = e
                 LogUtils.warn(TAG, "Download attempt ${attempt + 1}/$maxRetries failed for $url: ${e.message}")
-                if (attempt < maxRetries && !cancelled.get()) {
+                if (attempt < maxRetries) {
                     try { Thread.sleep(150L * (attempt + 1)) } catch (_: InterruptedException) {}
                 }
             } finally {
@@ -404,12 +408,16 @@ class SvgaParser(
 
         // 重试耗尽后向所有在途等待者分发错误
         val finalException = lastException ?: Exception("Download failed for $url")
-        val callbacks: List<ParseCompletion>
+        val callbacksToNotify: List<ParseCompletion>
         synchronized(inFlightLock) {
-            callbacks = inFlightUrlTasks.remove(cacheKey)?.toList() ?: emptyList()
+            task.isCompleted = true
+            if (inFlightUrlTasks[cacheKey] === task) {
+                inFlightUrlTasks.remove(cacheKey)
+            }
+            callbacksToNotify = task.callbacks.toList()
         }
         handler.post {
-            callbacks.forEach { it.onError(finalException, url.toString()) }
+            callbacksToNotify.forEach { it.onError(finalException, url.toString()) }
         }
     }
 
@@ -476,6 +484,7 @@ class SvgaParser(
                         }, playCallback)
                     } else {
                         inflate(bytes)?.let { inflatedBytes ->
+                            saveBinaryAtomic(inflatedBytes, cacheDir)
                             val movieEntity = try {
                                 MovieEntity.ADAPTER.decode(inflatedBytes)
                             } catch (e: Exception) {
@@ -618,6 +627,28 @@ class SvgaParser(
                 zis.closeEntry()
                 entry = zis.nextEntry
             }
+        }
+    }
+
+    private fun saveBinaryAtomic(bytes: ByteArray, cacheDir: File) {
+        if (!cacheDir.exists()) cacheDir.mkdirs()
+        val destFile = File(cacheDir, "movie.binary")
+        if (destFile.exists() && destFile.length() == bytes.size.toLong()) {
+            return
+        }
+        val tmpFile = File(cacheDir, "movie.binary.tmp_${System.nanoTime()}")
+        try {
+            FileOutputStream(tmpFile).use { fos ->
+                fos.write(bytes)
+                fos.flush()
+            }
+            if (!tmpFile.renameTo(destFile)) {
+                tmpFile.copyTo(destFile, overwrite = true)
+                tmpFile.delete()
+            }
+        } catch (t: Throwable) {
+            tmpFile.delete()
+            LogUtils.warn(TAG, "Failed to save binary cache: ${t.message}")
         }
     }
 
