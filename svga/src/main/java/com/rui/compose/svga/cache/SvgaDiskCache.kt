@@ -105,7 +105,7 @@ object SvgaDiskCache {
         try {
             val root = getCacheDir()
             if (!root.exists() || !root.isDirectory) return
-            val dirs = root.listFiles()?.filter { it.isDirectory } ?: return
+            val dirs = root.listFiles()?.filter { it.isDirectory && it.name != "audios" } ?: return
             var totalSize = dirs.sumOf { dir -> dir.walkTopDown().filter { it.isFile }.sumOf { it.length() } }
             if (totalSize <= maxBytes) return
 

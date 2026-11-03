@@ -2,9 +2,7 @@ package com.rui.compose.svga.entity
 
 import android.graphics.Bitmap
 import android.media.AudioAttributes
-import android.media.AudioManager
 import android.media.SoundPool
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import com.rui.compose.svga.proto.AudioEntity
@@ -439,18 +437,13 @@ class SvgaVideoEntity {
             return
         }
         val streamCount = 12.coerceAtMost(kotlin.math.max(1, entity.audios.size))
-        val pool = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            val attributes = AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_MEDIA)
-                .build()
-            SoundPool.Builder()
-                .setAudioAttributes(attributes)
-                .setMaxStreams(streamCount)
-                .build()
-        } else {
-            @Suppress("DEPRECATION")
-            SoundPool(streamCount, AudioManager.STREAM_MUSIC, 0)
-        }
+        val attributes = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_MEDIA)
+            .build()
+        val pool = SoundPool.Builder()
+            .setAudioAttributes(attributes)
+            .setMaxStreams(streamCount)
+            .build()
         pool.setOnLoadCompleteListener { _, _, _ ->
             onOneSoundLoaded()
         }

@@ -1,9 +1,7 @@
 package com.rui.compose.svga.audio
 
 import android.media.AudioAttributes
-import android.media.AudioManager
 import android.media.SoundPool
-import android.os.Build
 import com.rui.compose.svga.entity.SvgaVideoEntity
 import com.rui.compose.svga.utils.log.LogUtils
 import java.io.FileDescriptor
@@ -73,18 +71,13 @@ object SvgaSoundManager {
     }
 
     private fun createSoundPool(maxStreams: Int): SoundPool {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            val attributes = AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_MEDIA)
-                .build()
-            SoundPool.Builder()
-                .setAudioAttributes(attributes)
-                .setMaxStreams(maxStreams)
-                .build()
-        } else {
-            @Suppress("DEPRECATION")
-            SoundPool(maxStreams, AudioManager.STREAM_MUSIC, 0)
-        }
+        val attributes = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_MEDIA)
+            .build()
+        return SoundPool.Builder()
+            .setAudioAttributes(attributes)
+            .setMaxStreams(maxStreams)
+            .build()
     }
 
     internal fun load(

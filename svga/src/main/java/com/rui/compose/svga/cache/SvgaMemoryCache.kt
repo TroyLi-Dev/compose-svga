@@ -35,9 +35,13 @@ class SvgaMemoryCache private constructor() {
     }
 
     private fun getImageSize(entity: SvgaVideoEntity?): Int {
+        val map = entity?.imageMap ?: return 1024
         var size = 0
-        entity?.imageMap?.values?.forEach { bitmap ->
-            size += if (bitmap.isRecycled) 0 else bitmap.byteCount
+        val visited = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<android.graphics.Bitmap, Boolean>())
+        map.values.forEach { bitmap ->
+            if (!bitmap.isRecycled && visited.add(bitmap)) {
+                size += bitmap.byteCount
+            }
         }
         return if (size <= 0) 1024 else size
     }

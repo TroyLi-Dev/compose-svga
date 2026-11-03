@@ -30,7 +30,6 @@ val LocalSvgaClock = staticCompositionLocalOf<State<Long>> { SvgaEnvironment.tic
  * 2. 引用计数与监听器双重探测：当没有任何可见或活跃动画时，立即注销 FrameCallback，CPU 占用彻底归零 (0% CPU)。
  */
 internal object SvgaEnvironment {
-    private var refCount = 0
     val tickState = mutableLongStateOf(System.nanoTime())
     val loadState = mutableStateOf(SystemLoad())
 
@@ -105,16 +104,6 @@ internal object SvgaEnvironment {
             if (Looper.myLooper() == Looper.getMainLooper()) unschedule() else mainHandler.post(unschedule)
         }
         return removed
-    }
-
-    @Synchronized
-    fun attach() {
-        refCount++
-    }
-
-    @Synchronized
-    fun detach() {
-        if (refCount > 0) refCount--
     }
 
     private fun ensureChoreographerScheduled() {

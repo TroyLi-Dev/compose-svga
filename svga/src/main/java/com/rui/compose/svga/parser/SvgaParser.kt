@@ -563,7 +563,7 @@ class SvgaParser(
                 } else {
                     file.parentFile?.mkdirs()
                     FileOutputStream(file).use { fos ->
-                        val buffer = ByteArray(4096)
+                        val buffer = ByteArray(16384)
                         var len: Int
                         while (zis.read(buffer).also { len = it } > 0) {
                             totalUncompressedBytes += len
@@ -593,7 +593,7 @@ class SvgaParser(
         val inflater = Inflater()
         return try {
             inflater.setInput(byteArray, 0, byteArray.size)
-            val result = ByteArray(4096)
+            val result = ByteArray(16384)
             val baos = ByteArrayOutputStream()
             var totalBytes = 0
             while (!inflater.finished()) {
@@ -617,7 +617,7 @@ class SvgaParser(
     }
 
     private fun readStreamToByteArray(inputStream: InputStream): ByteArray {
-        val buffer = ByteArray(4096)
+        val buffer = ByteArray(16384)
         val baos = ByteArrayOutputStream()
         var len: Int
         var totalBytes = 0

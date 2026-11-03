@@ -66,7 +66,6 @@ class SvgaDynamicEntity {
 
     fun setDynamicImage(bitmap: Bitmap, forKey: String): SvgaDynamicEntity {
         this.dynamicImage[forKey] = bitmap
-        notifyResReplaced()
         return this
     }
 
@@ -120,7 +119,10 @@ class SvgaDynamicEntity {
                         null
                     }
                     if (bitmap != null) {
-                        handler.post { setDynamicImage(bitmap, forKey) }
+                        handler.post {
+                            dynamicImage[forKey] = bitmap
+                            notifyResReplaced()
+                        }
                     } else {
                         handler.post { notifyResReplaced() }
                     }
@@ -141,7 +143,6 @@ class SvgaDynamicEntity {
         this.isTextDirty = true
         this.dynamicText[forKey] = text
         this.dynamicTextPaint[forKey] = textPaint
-        notifyResReplaced()
         return this
     }
 
@@ -202,6 +203,9 @@ class SvgaDynamicEntity {
 
     fun clearDynamicObjects() {
         this.isTextDirty = true
+        this._dynamicSize.set(0)
+        this._loadOkSize.set(0)
+        this.replaceFinish = null
         this.dynamicHidden.clear()
         this.dynamicImage.clear()
         this.dynamicText.clear()

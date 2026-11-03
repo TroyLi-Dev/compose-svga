@@ -103,7 +103,7 @@ open class SvgaImageView @JvmOverloads constructor(
             cached.antiAlias = antiAlias
             setVideoItem(cached)
             onComplete?.invoke(cached)
-            if (autoPlay && (Build.VERSION.SDK_INT < Build.VERSION_CODES.KITKAT || isAttachedToWindow)) {
+            if (autoPlay && isAttachedToWindow) {
                 startAnimation()
             }
             return
@@ -115,7 +115,7 @@ open class SvgaImageView @JvmOverloads constructor(
                     videoItem.antiAlias = antiAlias
                     setVideoItem(videoItem)
                     onComplete?.invoke(videoItem)
-                    if (autoPlay && (Build.VERSION.SDK_INT < Build.VERSION_CODES.KITKAT || isAttachedToWindow)) {
+                    if (autoPlay && isAttachedToWindow) {
                         startAnimation()
                     }
                 }
@@ -296,7 +296,7 @@ open class SvgaImageView @JvmOverloads constructor(
     override fun onVisibilityChanged(changedView: android.view.View, visibility: Int) {
         super.onVisibilityChanged(changedView, visibility)
         if (isShown) {
-            if (wasAnimatingBeforeHide && (Build.VERSION.SDK_INT < Build.VERSION_CODES.KITKAT || isAttachedToWindow)) {
+            if (wasAnimatingBeforeHide && isAttachedToWindow) {
                 wasAnimatingBeforeHide = false
                 if (animator?.isPaused == true) {
                     animator?.resume()

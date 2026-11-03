@@ -50,7 +50,7 @@ open class SvgaDrawable(
         val w = if (bounds.width() > 0) bounds.width().toFloat() else videoEntity.videoSize.width.toFloat()
         val h = if (bounds.height() > 0) bounds.height().toFloat() else videoEntity.videoSize.height.toFloat()
         if (w <= 0f || h <= 0f) return
-        val saveCount = if (alphaVal < 255 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+        val saveCount = if (alphaVal < 255) {
             canvas.saveLayerAlpha(bounds.left.toFloat(), bounds.top.toFloat(), bounds.left.toFloat() + w, bounds.top.toFloat() + h, alphaVal)
         } else {
             canvas.save()

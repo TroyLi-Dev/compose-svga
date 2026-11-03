@@ -33,7 +33,6 @@ import com.rui.compose.svga.cache.SvgaDiskCache
 import com.rui.compose.svga.cache.SvgaMemoryCache
 import com.rui.compose.svga.controller.SvgaController
 import com.rui.compose.svga.controller.rememberSvgaController
-import com.rui.compose.svga.core.LocalSvgaClock
 import com.rui.compose.svga.core.LocalSystemLoad
 import com.rui.compose.svga.core.SvgaEnvironment
 import com.rui.compose.svga.drawer.SvgaCanvasDrawer
@@ -107,7 +106,6 @@ fun SvgaAnimation(
     }
 
     val context = LocalContext.current.applicationContext
-    val globalTick = LocalSvgaClock.current
     val systemLoad = LocalSystemLoad.current
     var componentSize by remember { mutableStateOf(IntSize.Zero) }
 
@@ -139,13 +137,6 @@ fun SvgaAnimation(
     val currentOnError by rememberUpdatedState(onError)
     val currentOnStep by rememberUpdatedState(onStep)
     val currentOnFinished by rememberUpdatedState(onFinished)
-
-    DisposableEffect(globalTick) {
-        if (globalTick == SvgaEnvironment.tickState) {
-            SvgaEnvironment.attach()
-            onDispose { SvgaEnvironment.detach() }
-        } else onDispose {}
-    }
 
     val cacheKey = remember(model) {
         SvgaDiskCache.buildCacheKeyForModel(model)

@@ -26,7 +26,6 @@ class SvgaCanvasDrawer(
 
     private val sharedValues = ShareValues()
     private val drawTextCache: HashMap<String, Bitmap> = hashMapOf()
-    private val pathCache = PathCache()
 
     val matteSprites = mutableMapOf<String, SvgaDrawerSprite>()
     private val matrixScaleTempValues = FloatArray(9)
@@ -42,7 +41,6 @@ class SvgaCanvasDrawer(
         super.drawFrame(canvas, frameIndex, scaleType, overrideWidth, overrideHeight)
 
         playAudio(frameIndex)
-        this.pathCache.onSizeChanged(canvas)
         val sprites = requestFrameSprites(frameIndex)
         if (sprites.isEmpty()) return
 
@@ -71,11 +69,7 @@ class SvgaCanvasDrawer(
                     if (saveID != -1) {
                         try { canvas.restoreToCount(saveID) } catch (_: Throwable) {}
                     }
-                    saveID = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                        canvas.saveLayer(0f, 0f, drawWidth, drawHeight, null)
-                    } else {
-                        canvas.save()
-                    }
+                    saveID = canvas.saveLayer(0f, 0f, drawWidth, drawHeight, null)
                 }
                 drawSprite(svgaDrawerSprite, canvas, frameIndex)
 
@@ -86,7 +80,8 @@ class SvgaCanvasDrawer(
                         val matteBitmap = this.sharedValues.sharedMatteBitmap()
                         if (matteCanvas != null && matteBitmap != null && !matteBitmap.isRecycled) {
                             drawSprite(matteSprite, matteCanvas, frameIndex)
-                            val srcRect = android.graphics.Rect(0, 0, drawWidth.toInt(), drawHeight.toInt())
+                            val srcRect = this.sharedValues.sharedRect()
+                            srcRect.set(0, 0, drawWidth.toInt(), drawHeight.toInt())
                             val dstRect = this.sharedValues.sharedRectF()
                             dstRect.set(0f, 0f, drawWidth, drawHeight)
                             canvas.drawBitmap(
@@ -201,6 +196,15 @@ class SvgaCanvasDrawer(
         drawTextCache.values.forEach { if (!it.isRecycled) it.recycle() }
         drawTextCache.clear()
         sharedValues.release()
+        videoItem.audioList.forEach { audio ->
+            audio.playID?.let {
+                try {
+                    if (SvgaSoundManager.isInit()) SvgaSoundManager.stop(it)
+                    else videoItem.soundPool?.stop(it)
+                } catch (_: Throwable) {}
+            }
+            audio.playID = null
+        }
     }
 
     private fun obtainFrameMatrix(transform: Matrix): Matrix {
@@ -437,14 +441,13 @@ class SvgaCanvasDrawer(
         val frameMatrix = obtainFrameMatrix(sprite.frameEntity.transform)
         sprite.frameEntity.shapes.forEach { shape ->
             shape.buildPath()
-            shape.shapePath?.let {
+            shape.shapePath?.let { shapePath ->
                 val paint = this.sharedValues.sharedPaint()
                 paint.reset()
                 paint.isAntiAlias = videoItem.antiAlias
                 paint.alpha = (sprite.frameEntity.alpha * 255).toInt()
                 val path = this.sharedValues.sharedPath()
-                path.reset()
-                path.addPath(this.pathCache.buildPath(shape))
+                path.set(shapePath)
                 val shapeMatrix = this.sharedValues.sharedMatrix2()
                 shapeMatrix.reset()
                 shape.transform?.let { t -> shapeMatrix.postConcat(t) }
@@ -587,11 +590,16 @@ class SvgaCanvasDrawer(
         private val sharedPath2 = Path()
         private val sharedMatrix = Matrix()
         private val sharedMatrix2 = Matrix()
+        private val sharedRect = android.graphics.Rect()
         private val sharedRectF = RectF()
         private val matteXfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN)
         private val shareMattePaint = Paint().apply { xfermode = matteXfermode }
         private var sharedMatteBitmap: Bitmap? = null
         private var cachedMatteCanvas: Canvas? = null
+
+        fun sharedRect(): android.graphics.Rect {
+            sharedRect.setEmpty(); return sharedRect
+        }
 
         fun sharedRectF(): RectF {
             sharedRectF.setEmpty(); return sharedRectF
@@ -650,26 +658,6 @@ class SvgaCanvasDrawer(
             } catch (_: Throwable) {}
             sharedMatteBitmap = null
             cachedMatteCanvas = null
-        }
-    }
-
-    class PathCache {
-        private var canvasWidth: Int = 0
-        private var canvasHeight: Int = 0
-        private val cache = HashMap<SvgaVideoShapeEntity, Path>()
-
-        fun onSizeChanged(canvas: Canvas) {
-            if (this.canvasWidth != canvas.width || this.canvasHeight != canvas.height) {
-                this.cache.clear()
-            }
-            this.canvasWidth = canvas.width
-            this.canvasHeight = canvas.height
-        }
-
-        fun buildPath(shape: SvgaVideoShapeEntity): Path {
-            return cache.getOrPut(shape) {
-                Path().apply { shape.shapePath?.let { set(it) } }
-            }
         }
     }
 }
