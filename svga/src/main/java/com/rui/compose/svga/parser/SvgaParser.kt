@@ -594,7 +594,8 @@ class SvgaParser(
         return try {
             inflater.setInput(byteArray, 0, byteArray.size)
             val result = ByteArray(16384)
-            val baos = ByteArrayOutputStream()
+            val initialCap = (byteArray.size * 2).coerceIn(32768, MAX_INFLATED_BYTES)
+            val baos = ByteArrayOutputStream(initialCap)
             var totalBytes = 0
             while (!inflater.finished()) {
                 val count = inflater.inflate(result)
@@ -618,7 +619,11 @@ class SvgaParser(
 
     private fun readStreamToByteArray(inputStream: InputStream): ByteArray {
         val buffer = ByteArray(16384)
-        val baos = ByteArrayOutputStream()
+        val initialCap = kotlin.math.max(
+            32768,
+            try { inputStream.available().coerceIn(0, MAX_STREAM_BYTES) } catch (_: Throwable) { 32768 }
+        )
+        val baos = ByteArrayOutputStream(initialCap)
         var len: Int
         var totalBytes = 0
         while (inputStream.read(buffer).also { len = it } != -1) {

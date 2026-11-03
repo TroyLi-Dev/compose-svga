@@ -254,45 +254,46 @@ class SvgaCanvasDrawer(
         paint.isFilterBitmap = videoItem.antiAlias
         paint.alpha = (sprite.frameEntity.alpha * 255).toInt()
 
-        if (sprite.frameEntity.maskPath != null) {
-            val maskPath = sprite.frameEntity.maskPath ?: return
-            val count = canvas.save()
-            try {
-                val path = this.sharedValues.sharedPath()
-                maskPath.buildPath(path)
-                path.transform(frameMatrix)
-                canvas.clipPath(path)
-                val sx = (sprite.frameEntity.layout.width / drawingBitmap.width).toFloat()
-                val sy = (sprite.frameEntity.layout.height / drawingBitmap.height).toFloat()
-                if (sx.isFinite() && sy.isFinite() && sx > 0f && sy > 0f) {
-                    frameMatrix.preScale(sx, sy)
-                }
-                if (!drawingBitmap.isRecycled) canvas.drawBitmap(drawingBitmap, frameMatrix, paint)
-            } finally {
-                canvas.restoreToCount(count)
-            }
+        val maskPath = sprite.frameEntity.maskPath
+        val count = if (maskPath != null) {
+            val c = canvas.save()
+            val path = this.sharedValues.sharedPath()
+            maskPath.buildPath(path)
+            path.transform(frameMatrix)
+            canvas.clipPath(path)
+            c
         } else {
+            -1
+        }
+        try {
             val sx = (sprite.frameEntity.layout.width / drawingBitmap.width).toFloat()
             val sy = (sprite.frameEntity.layout.height / drawingBitmap.height).toFloat()
             if (sx.isFinite() && sy.isFinite() && sx > 0f && sy > 0f) {
                 frameMatrix.preScale(sx, sy)
             }
-            if (!drawingBitmap.isRecycled) canvas.drawBitmap(drawingBitmap, frameMatrix, paint)
-        }
+            if (!drawingBitmap.isRecycled) {
+                canvas.drawBitmap(drawingBitmap, frameMatrix, paint)
+            }
 
-        dynamicItem.dynamicClickArea[imageKey]?.let { listener ->
-            val rect = this.sharedValues.sharedRectF()
-            rect.set(0f, 0f, drawingBitmap.width.toFloat(), drawingBitmap.height.toFloat())
-            frameMatrix.mapRect(rect)
-            listener.onResponseArea(
-                imageKey,
-                rect.left.toInt(),
-                rect.top.toInt(),
-                rect.right.toInt(),
-                rect.bottom.toInt()
-            )
+            dynamicItem.dynamicClickArea[imageKey]?.let { listener ->
+                val rect = this.sharedValues.sharedRectF()
+                rect.set(0f, 0f, drawingBitmap.width.toFloat(), drawingBitmap.height.toFloat())
+                frameMatrix.mapRect(rect)
+                listener.onResponseArea(
+                    imageKey,
+                    rect.left.toInt(),
+                    rect.top.toInt(),
+                    rect.right.toInt(),
+                    rect.bottom.toInt()
+                )
+            }
+
+            drawTextOnBitmap(canvas, drawingBitmap, sprite, frameMatrix)
+        } finally {
+            if (count != -1) {
+                canvas.restoreToCount(count)
+            }
         }
-        drawTextOnBitmap(canvas, drawingBitmap, sprite, frameMatrix)
     }
 
     private fun drawTextOnBitmap(
@@ -456,122 +457,93 @@ class SvgaCanvasDrawer(
             paint.isAntiAlias = videoItem.antiAlias
             paint.isFilterBitmap = videoItem.antiAlias
             paint.alpha = (sprite.frameEntity.alpha * 255).toInt()
-            if (sprite.frameEntity.maskPath != null) {
-                val maskPath = sprite.frameEntity.maskPath ?: return@let
-                val count = canvas.save()
-                try {
-                    val originMatrix = obtainFrameMatrix(sprite.frameEntity.transform)
-                    val path = this.sharedValues.sharedPath()
-                    maskPath.buildPath(path)
-                    path.transform(originMatrix)
-                    canvas.clipPath(path)
-                    if (!tb.isRecycled) {
-                        canvas.drawBitmap(tb, frameMatrix, paint)
-                    }
-                } finally {
-                    canvas.restoreToCount(count)
-                }
-            } else {
-                if (!tb.isRecycled) {
-                    canvas.drawBitmap(tb, frameMatrix, paint)
-                }
-            }
+            canvas.drawBitmap(tb, frameMatrix, paint)
         }
     }
 
     private fun drawShape(sprite: SvgaDrawerSprite, canvas: Canvas) {
+        if (sprite.frameEntity.shapes.isEmpty()) return
         val frameMatrix = obtainFrameMatrix(sprite.frameEntity.transform)
-        sprite.frameEntity.shapes.forEach { shape ->
-            shape.buildPath()
-            shape.shapePath?.let { shapePath ->
-                val paint = this.sharedValues.sharedPaint()
-                paint.reset()
-                paint.isAntiAlias = videoItem.antiAlias
-                paint.alpha = (sprite.frameEntity.alpha * 255).toInt()
-                val path = this.sharedValues.sharedPath()
-                path.set(shapePath)
-                val shapeMatrix = this.sharedValues.sharedMatrix2()
-                shapeMatrix.reset()
-                shape.transform?.let { t -> shapeMatrix.postConcat(t) }
-                shapeMatrix.postConcat(frameMatrix)
-                path.transform(shapeMatrix)
+        val maskPath = sprite.frameEntity.maskPath
+        val saveCount = if (maskPath != null) {
+            val count = canvas.save()
+            val path2 = this.sharedValues.sharedPath2()
+            maskPath.buildPath(path2)
+            path2.transform(frameMatrix)
+            canvas.clipPath(path2)
+            count
+        } else {
+            -1
+        }
+        try {
+            sprite.frameEntity.shapes.forEach { shape ->
+                shape.buildPath()
+                shape.shapePath?.let { shapePath ->
+                    val paint = this.sharedValues.sharedPaint()
+                    paint.reset()
+                    paint.isAntiAlias = videoItem.antiAlias
+                    val alpha = (sprite.frameEntity.alpha * 255).toInt().coerceIn(0, 255)
+                    paint.alpha = alpha
+                    val path = this.sharedValues.sharedPath()
+                    path.set(shapePath)
+                    val shapeMatrix = this.sharedValues.sharedMatrix2()
+                    shapeMatrix.reset()
+                    shape.transform?.let { t -> shapeMatrix.postConcat(t) }
+                    shapeMatrix.postConcat(frameMatrix)
+                    path.transform(shapeMatrix)
 
-                shape.styles?.fill?.let { color ->
-                    if (color != 0x00000000) {
-                        paint.style = Paint.Style.FILL
-                        paint.color = color
-                        val alpha = (sprite.frameEntity.alpha * 255).toInt().coerceIn(0, 255)
-                        if (alpha != 255) paint.alpha = alpha
-                        if (sprite.frameEntity.maskPath != null) {
-                            val count = canvas.save()
-                            try {
-                                val path2 = this.sharedValues.sharedPath2()
-                                sprite.frameEntity.maskPath?.buildPath(path2)
-                                path2.transform(frameMatrix)
-                                canvas.clipPath(path2)
-                                canvas.drawPath(path, paint)
-                            } finally {
-                                canvas.restoreToCount(count)
-                            }
-                        } else {
-                            canvas.drawPath(path, paint)
-                        }
-                    }
-                }
-                shape.styles?.strokeWidth?.let { width ->
-                    if (width > 0) {
-                        paint.alpha = (sprite.frameEntity.alpha * 255).toInt()
-                        paint.style = Paint.Style.STROKE
-                        shape.styles?.stroke?.let { color ->
+                    shape.styles?.fill?.let { color ->
+                        if (color != 0x00000000) {
+                            paint.style = Paint.Style.FILL
                             paint.color = color
-                            val alpha = (sprite.frameEntity.alpha * 255).toInt().coerceIn(0, 255)
                             if (alpha != 255) paint.alpha = alpha
+                            canvas.drawPath(path, paint)
                         }
-                        val scale = matrixScale(frameMatrix)
-                        paint.strokeWidth = width * scale
-                        shape.styles?.lineCap?.let { cap ->
-                            when {
-                                cap.equals("butt", true) -> paint.strokeCap = Paint.Cap.BUTT
-                                cap.equals("round", true) -> paint.strokeCap = Paint.Cap.ROUND
-                                cap.equals("square", true) -> paint.strokeCap = Paint.Cap.SQUARE
+                    }
+                    shape.styles?.strokeWidth?.let { width ->
+                        if (width > 0) {
+                            paint.style = Paint.Style.STROKE
+                            shape.styles?.stroke?.let { color ->
+                                paint.color = color
+                                if (alpha != 255) paint.alpha = alpha
                             }
-                        }
-                        shape.styles?.lineJoin?.let { join ->
-                            when {
-                                join.equals("miter", true) -> paint.strokeJoin = Paint.Join.MITER
-                                join.equals("round", true) -> paint.strokeJoin = Paint.Join.ROUND
-                                join.equals("bevel", true) -> paint.strokeJoin = Paint.Join.BEVEL
+                            val scale = matrixScale(frameMatrix)
+                            paint.strokeWidth = width * scale
+                            shape.styles?.lineCap?.let { cap ->
+                                when {
+                                    cap.equals("butt", true) -> paint.strokeCap = Paint.Cap.BUTT
+                                    cap.equals("round", true) -> paint.strokeCap = Paint.Cap.ROUND
+                                    cap.equals("square", true) -> paint.strokeCap = Paint.Cap.SQUARE
+                                }
                             }
-                        }
-                        shape.styles?.miterLimit?.let { paint.strokeMiter = it.toFloat() * scale }
-                        shape.styles?.lineDash?.let { dash ->
-                            if (scale > 0f && dash.size == 3 && (dash[0] > 0 || dash[1] > 0)) {
-                                val interval0 = (dash[0] * scale).coerceAtLeast(1.0f)
-                                val interval1 = (dash[1] * scale).coerceAtLeast(0.1f)
-                                try {
-                                    paint.pathEffect = DashPathEffect(
-                                        this.sharedValues.sharedDashIntervals(interval0, interval1),
-                                        dash[2] * scale
-                                    )
-                                } catch (_: Throwable) {}
+                            shape.styles?.lineJoin?.let { join ->
+                                when {
+                                    join.equals("miter", true) -> paint.strokeJoin = Paint.Join.MITER
+                                    join.equals("round", true) -> paint.strokeJoin = Paint.Join.ROUND
+                                    join.equals("bevel", true) -> paint.strokeJoin = Paint.Join.BEVEL
+                                }
                             }
-                        }
-                        if (sprite.frameEntity.maskPath != null) {
-                            val count = canvas.save()
-                            try {
-                                val path2 = this.sharedValues.sharedPath2()
-                                sprite.frameEntity.maskPath?.buildPath(path2)
-                                path2.transform(frameMatrix)
-                                canvas.clipPath(path2)
-                                canvas.drawPath(path, paint)
-                            } finally {
-                                canvas.restoreToCount(count)
+                            shape.styles?.miterLimit?.let { paint.strokeMiter = it.toFloat() * scale }
+                            shape.styles?.lineDash?.let { dash ->
+                                if (scale > 0f && dash.size == 3 && (dash[0] > 0 || dash[1] > 0)) {
+                                    val interval0 = (dash[0] * scale).coerceAtLeast(1.0f)
+                                    val interval1 = (dash[1] * scale).coerceAtLeast(0.1f)
+                                    try {
+                                        paint.pathEffect = DashPathEffect(
+                                            this.sharedValues.sharedDashIntervals(interval0, interval1),
+                                            dash[2] * scale
+                                        )
+                                    } catch (_: Throwable) {}
+                                }
                             }
-                        } else {
                             canvas.drawPath(path, paint)
                         }
                     }
                 }
+            }
+        } finally {
+            if (saveCount != -1) {
+                canvas.restoreToCount(saveCount)
             }
         }
     }

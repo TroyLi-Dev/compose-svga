@@ -111,7 +111,8 @@ class SvgaDynamicEntity {
                     break
                 }
 
-                conn?.inputStream?.use { stream ->
+                conn?.inputStream?.use { rawStream ->
+                    val stream = java.io.BufferedInputStream(rawStream)
                     val bitmap = try {
                         BitmapFactory.decodeStream(stream)
                     } catch (t: Throwable) {
