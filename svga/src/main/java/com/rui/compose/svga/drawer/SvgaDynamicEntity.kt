@@ -25,16 +25,16 @@ interface SvgaClickAreaListener {
  */
 class SvgaDynamicEntity {
 
-    internal var dynamicHidden: ConcurrentHashMap<String, Boolean> = ConcurrentHashMap()
-    internal var dynamicImage: ConcurrentHashMap<String, Bitmap> = ConcurrentHashMap()
-    internal var dynamicText: ConcurrentHashMap<String, String> = ConcurrentHashMap()
-    internal var dynamicTextPaint: ConcurrentHashMap<String, TextPaint> = ConcurrentHashMap()
-    internal var dynamicStaticLayoutText: ConcurrentHashMap<String, StaticLayout> = ConcurrentHashMap()
-    internal var dynamicBoringLayoutText: ConcurrentHashMap<String, BoringLayout> = ConcurrentHashMap()
-    internal var dynamicDrawer: ConcurrentHashMap<String, (canvas: Canvas, frameIndex: Int) -> Boolean> = ConcurrentHashMap()
-    internal var dynamicClickArea: ConcurrentHashMap<String, SvgaClickAreaListener> = ConcurrentHashMap()
-    internal var dynamicDrawerSized: ConcurrentHashMap<String, (canvas: Canvas, frameIndex: Int, width: Int, height: Int) -> Boolean> = ConcurrentHashMap()
-    internal var clickMap: ConcurrentHashMap<String, IntArray> = ConcurrentHashMap()
+    var dynamicHidden: ConcurrentHashMap<String, Boolean> = ConcurrentHashMap()
+    var dynamicImage: ConcurrentHashMap<String, Bitmap> = ConcurrentHashMap()
+    var dynamicText: ConcurrentHashMap<String, String> = ConcurrentHashMap()
+    var dynamicTextPaint: ConcurrentHashMap<String, TextPaint> = ConcurrentHashMap()
+    var dynamicStaticLayoutText: ConcurrentHashMap<String, StaticLayout> = ConcurrentHashMap()
+    var dynamicBoringLayoutText: ConcurrentHashMap<String, BoringLayout> = ConcurrentHashMap()
+    var dynamicDrawer: ConcurrentHashMap<String, (canvas: Canvas, frameIndex: Int) -> Boolean> = ConcurrentHashMap()
+    var dynamicClickArea: ConcurrentHashMap<String, SvgaClickAreaListener> = ConcurrentHashMap()
+    var dynamicDrawerSized: ConcurrentHashMap<String, (canvas: Canvas, frameIndex: Int, width: Int, height: Int) -> Boolean> = ConcurrentHashMap()
+    var clickMap: ConcurrentHashMap<String, IntArray> = ConcurrentHashMap()
     @Volatile
     internal var isTextDirty = false
 
@@ -249,6 +249,22 @@ class SvgaDynamicDsl {
 
     fun hidden(key: String, isHidden: Boolean = true) {
         entity.setHidden(isHidden, key)
+    }
+
+    fun drawer(key: String, drawer: (Canvas, Int) -> Boolean) {
+        entity.setDynamicDrawer(drawer, key)
+    }
+
+    fun drawerSized(key: String, drawer: (Canvas, Int, Int, Int) -> Boolean) {
+        entity.setDynamicDrawerSized(drawer, key)
+    }
+
+    fun text(key: String, layout: StaticLayout) {
+        entity.setDynamicText(layout, key)
+    }
+
+    fun text(key: String, layout: BoringLayout) {
+        entity.setDynamicText(layout, key)
     }
 
     fun build(): SvgaDynamicEntity = entity

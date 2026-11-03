@@ -46,7 +46,16 @@ object SvgaSoundManager {
 
         if (entity == null) {
             this.volume = clamped
-            soundCallbackMap.values.forEach { it.get()?.onVolumeChange(clamped) }
+            val iterator = soundCallbackMap.entries.iterator()
+            while (iterator.hasNext()) {
+                val entry = iterator.next()
+                val cb = entry.value.get()
+                if (cb == null) {
+                    iterator.remove()
+                } else {
+                    cb.onVolumeChange(clamped)
+                }
+            }
             return
         }
 
@@ -139,30 +148,30 @@ object SvgaSoundManager {
         }
     }
 
-    internal fun stop(soundId: Int) {
+    internal fun stop(streamId: Int) {
         val pool = soundPool ?: return
         try {
-            pool.stop(soundId)
+            pool.stop(streamId)
         } catch (t: Throwable) {
-            LogUtils.error(TAG, "SoundPool stop failed for soundId=$soundId", t)
+            LogUtils.error(TAG, "SoundPool stop failed for streamId=$streamId", t)
         }
     }
 
-    internal fun resume(soundId: Int) {
+    internal fun resume(streamId: Int) {
         val pool = soundPool ?: return
         try {
-            pool.resume(soundId)
+            pool.resume(streamId)
         } catch (t: Throwable) {
-            LogUtils.error(TAG, "SoundPool resume failed for soundId=$soundId", t)
+            LogUtils.error(TAG, "SoundPool resume failed for streamId=$streamId", t)
         }
     }
 
-    internal fun pause(soundId: Int) {
+    internal fun pause(streamId: Int) {
         val pool = soundPool ?: return
         try {
-            pool.pause(soundId)
+            pool.pause(streamId)
         } catch (t: Throwable) {
-            LogUtils.error(TAG, "SoundPool pause failed for soundId=$soundId", t)
+            LogUtils.error(TAG, "SoundPool pause failed for streamId=$streamId", t)
         }
     }
 }

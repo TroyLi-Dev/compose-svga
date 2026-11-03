@@ -192,8 +192,25 @@ open class SvgaImageView @JvmOverloads constructor(
     }
 
     fun pauseAnimation() {
-        stopAnimation(false)
-        callback?.onPause()
+        if (animator?.isRunning == true) {
+            animator?.pause()
+            getSvgaDrawable()?.pause()
+            isAnimating = false
+            callback?.onPause()
+        } else {
+            stopAnimation(false)
+            callback?.onPause()
+        }
+    }
+
+    fun resumeAnimation() {
+        if (animator?.isPaused == true) {
+            animator?.resume()
+            getSvgaDrawable()?.resume()
+            isAnimating = true
+        } else if (!isAnimating) {
+            startAnimation()
+        }
     }
 
     fun stopAnimation() {
@@ -300,6 +317,7 @@ open class SvgaImageView @JvmOverloads constructor(
                 wasAnimatingBeforeHide = false
                 if (animator?.isPaused == true) {
                     animator?.resume()
+                    getSvgaDrawable()?.resume()
                     isAnimating = true
                 } else if (!isAnimating && autoPlay) {
                     startAnimation()
@@ -309,7 +327,7 @@ open class SvgaImageView @JvmOverloads constructor(
             if (isAnimating) {
                 wasAnimatingBeforeHide = true
                 animator?.pause()
-                getSvgaDrawable()?.stop()
+                getSvgaDrawable()?.pause()
                 isAnimating = false
             }
         }
@@ -322,6 +340,7 @@ open class SvgaImageView @JvmOverloads constructor(
                 wasAnimatingBeforeHide = false
                 if (animator?.isPaused == true) {
                     animator?.resume()
+                    getSvgaDrawable()?.resume()
                     isAnimating = true
                 } else if (!isAnimating) {
                     startAnimation()
@@ -331,7 +350,7 @@ open class SvgaImageView @JvmOverloads constructor(
             if (isAnimating) {
                 wasAnimatingBeforeHide = true
                 animator?.pause()
-                getSvgaDrawable()?.stop()
+                getSvgaDrawable()?.pause()
                 isAnimating = false
             }
         }

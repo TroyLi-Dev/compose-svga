@@ -305,7 +305,10 @@ class SvgaCanvasDrawer(
 
         dynamicItem.dynamicText[imageKey]?.let { drawingText ->
             dynamicItem.dynamicTextPaint[imageKey]?.let { drawingTextPaint ->
-                drawTextCache[imageKey]?.let { textBitmap = it } ?: run {
+                val cached = drawTextCache[imageKey]
+                if (cached != null && !cached.isRecycled) {
+                    textBitmap = cached
+                } else {
                     try {
                         val tb = Bitmap.createBitmap(
                             drawingBitmap.width,
@@ -314,7 +317,8 @@ class SvgaCanvasDrawer(
                         )
                         val textCanvas = Canvas(tb)
                         drawingTextPaint.isAntiAlias = true
-                        val fontMetrics = drawingTextPaint.fontMetrics
+                        val fontMetrics = this.sharedValues.sharedFontMetrics
+                        drawingTextPaint.getFontMetrics(fontMetrics)
                         val baseLineY =
                             (drawingBitmap.height / 2f) - (fontMetrics.top + fontMetrics.bottom) / 2f
                         textCanvas.drawText(
@@ -334,7 +338,10 @@ class SvgaCanvasDrawer(
         }
 
         dynamicItem.dynamicBoringLayoutText[imageKey]?.let {
-            drawTextCache[imageKey]?.let { textBitmap = it } ?: run {
+            val cached = drawTextCache[imageKey]
+            if (cached != null && !cached.isRecycled) {
+                textBitmap = cached
+            } else {
                 try {
                     it.paint.isAntiAlias = true
                     val tb = Bitmap.createBitmap(
@@ -355,7 +362,10 @@ class SvgaCanvasDrawer(
         }
 
         dynamicItem.dynamicStaticLayoutText[imageKey]?.let {
-            drawTextCache[imageKey]?.let { textBitmap = it } ?: run {
+            val cached = drawTextCache[imageKey]
+            if (cached != null && !cached.isRecycled) {
+                textBitmap = cached
+            } else {
                 it.paint.isAntiAlias = true
                 val layout = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                     val lineMax = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
@@ -513,7 +523,7 @@ class SvgaCanvasDrawer(
                                 val interval1 = (dash[1] * scale).coerceAtLeast(0.1f)
                                 try {
                                     paint.pathEffect = DashPathEffect(
-                                        floatArrayOf(interval0, interval1),
+                                        this.sharedValues.sharedDashIntervals(interval0, interval1),
                                         dash[2] * scale
                                     )
                                 } catch (_: Throwable) {}
@@ -558,24 +568,39 @@ class SvgaCanvasDrawer(
 
     private fun drawDynamic(sprite: SvgaDrawerSprite, canvas: Canvas, frameIndex: Int) {
         val imageKey = sprite.imageKey ?: return
-        dynamicItem.dynamicDrawer[imageKey]?.let {
-            val frameMatrix = obtainFrameMatrix(sprite.frameEntity.transform)
+        val drawer1 = dynamicItem.dynamicDrawer[imageKey]
+        val drawer2 = dynamicItem.dynamicDrawerSized[imageKey]
+        if (drawer1 == null && drawer2 == null) return
+
+        val frameMatrix = obtainFrameMatrix(sprite.frameEntity.transform)
+        if (drawer1 != null) {
             val count = canvas.save()
             try {
+                sprite.frameEntity.maskPath?.let { maskPath ->
+                    val path = this.sharedValues.sharedPath()
+                    maskPath.buildPath(path)
+                    path.transform(frameMatrix)
+                    canvas.clipPath(path)
+                }
                 canvas.concat(frameMatrix)
-                it.invoke(canvas, frameIndex)
+                drawer1.invoke(canvas, frameIndex)
             } catch (t: Throwable) {
                 com.rui.compose.svga.utils.log.LogUtils.error("SvgaCanvasDrawer", "Custom dynamicDrawer crashed for $imageKey", t)
             } finally {
                 canvas.restoreToCount(count)
             }
         }
-        dynamicItem.dynamicDrawerSized[imageKey]?.let {
-            val frameMatrix = obtainFrameMatrix(sprite.frameEntity.transform)
+        if (drawer2 != null) {
             val count = canvas.save()
             try {
+                sprite.frameEntity.maskPath?.let { maskPath ->
+                    val path = this.sharedValues.sharedPath()
+                    maskPath.buildPath(path)
+                    path.transform(frameMatrix)
+                    canvas.clipPath(path)
+                }
                 canvas.concat(frameMatrix)
-                it.invoke(
+                drawer2.invoke(
                     canvas,
                     frameIndex,
                     sprite.frameEntity.layout.width.toInt(),
@@ -597,10 +622,18 @@ class SvgaCanvasDrawer(
         private val sharedMatrix2 = Matrix()
         private val sharedRect = android.graphics.Rect()
         private val sharedRectF = RectF()
+        private val sharedDashIntervals = FloatArray(2)
+        val sharedFontMetrics = Paint.FontMetrics()
         private val matteXfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN)
         private val shareMattePaint = Paint().apply { xfermode = matteXfermode }
         private var sharedMatteBitmap: Bitmap? = null
         private var cachedMatteCanvas: Canvas? = null
+
+        fun sharedDashIntervals(interval0: Float, interval1: Float): FloatArray {
+            sharedDashIntervals[0] = interval0
+            sharedDashIntervals[1] = interval1
+            return sharedDashIntervals
+        }
 
         fun sharedRect(): android.graphics.Rect {
             sharedRect.setEmpty(); return sharedRect

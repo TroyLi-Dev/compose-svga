@@ -55,7 +55,11 @@ class SvgaVideoEntity {
             } else {
                 val pool = soundPool ?: return
                 audioList.forEach { audio ->
-                    audio.playID?.let { pool.setVolume(it, clamped, clamped) }
+                    audio.playID?.let {
+                        try {
+                            pool.setVolume(it, clamped, clamped)
+                        } catch (_: Throwable) {}
+                    }
                 }
             }
         }
@@ -320,25 +324,32 @@ class SvgaVideoEntity {
             }
         }
 
-        val soundLoaded = AtomicInteger(0)
-        var submittedCount = 0
+        val validAudios = entity.audios.filter { audio ->
+            audio.totalTime.toDouble().toInt() > 0 &&
+            audiosFileMap[audio.audioKey]?.let { it.exists() && it.length() > 0 } == true
+        }
+        val targetCount = validAudios.size
+        if (targetCount == 0) {
+            this.audioList = entity.audios.map { SvgaAudioEntity(it) }
+            safeComplete()
+            return
+        }
 
+        val soundLoaded = AtomicInteger(0)
         setupSoundPool(entity) {
-            if (soundLoaded.incrementAndGet() >= submittedCount) {
+            if (soundLoaded.incrementAndGet() >= targetCount) {
                 safeComplete()
             }
         }
 
         this.audioList = entity.audios.map { audio ->
             val item = createSvgaAudioEntity(audio, audiosFileMap)
-            if (item.soundID != null && item.soundID!! > 0) {
-                submittedCount++
+            if (audio.totalTime.toDouble().toInt() > 0 && (item.soundID == null || item.soundID!! <= 0)) {
+                if (soundLoaded.incrementAndGet() >= targetCount) {
+                    safeComplete()
+                }
             }
             item
-        }
-
-        if (submittedCount == 0) {
-            safeComplete()
         }
     }
 
@@ -383,11 +394,10 @@ class SvgaVideoEntity {
     private fun generateAudioFileMap(entity: MovieEntity): HashMap<String, File> {
         val audiosDataMap = generateAudioMap(entity)
         val audiosFileMap = HashMap<String, File>()
-        val audioDir = File(cacheDir, "audios").apply { if (!exists()) mkdirs() }
         audiosDataMap.forEach { (key, bytes) ->
-            val safeKey = SvgaDiskCache.buildCacheKey(key)
-            val audioCache = File(audioDir, "$safeKey.mp3")
+            val audioCache = SvgaDiskCache.buildAudioFile(key)
             if (!audioCache.exists() || audioCache.length() == 0L) {
+                val audioDir = audioCache.parentFile ?: cacheDir
                 val tmpFile = File(audioDir, "${audioCache.name}.${System.nanoTime()}.tmp")
                 try {
                     FileOutputStream(tmpFile).use { fos ->
@@ -457,6 +467,15 @@ class SvgaVideoEntity {
         audioTimeoutRunnable?.let {
             Handler(Looper.getMainLooper()).removeCallbacks(it)
             audioTimeoutRunnable = null
+        }
+        this.audioList.forEach { audio ->
+            audio.playID?.let { streamId ->
+                try {
+                    if (SvgaSoundManager.isInit()) SvgaSoundManager.stop(streamId)
+                    else soundPool?.stop(streamId)
+                } catch (_: Throwable) {}
+                audio.playID = null
+            }
         }
         if (SvgaSoundManager.isInit()) {
             this.audioList.forEach {

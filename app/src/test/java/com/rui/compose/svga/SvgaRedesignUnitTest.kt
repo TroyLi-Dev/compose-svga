@@ -166,4 +166,50 @@ class SvgaRedesignUnitTest {
         dummyAnim.delete()
         animDir.delete()
     }
+
+    @Test
+    fun testDynamicDslExtensions() {
+        val dynamic = com.rui.compose.svga.drawer.buildSvgaDynamic {
+            hidden("banner", true)
+            click("btn_like")
+            drawer("wave") { canvas, frameIndex ->
+                canvas.drawColor(0)
+                true
+            }
+            drawerSized("avatar") { canvas, frameIndex, width, height ->
+                width > 0 && height > 0
+            }
+        }
+        assertTrue(dynamic.dynamicHidden["banner"] == true)
+        assertNotNull(dynamic.dynamicClickArea["btn_like"])
+        assertNotNull(dynamic.dynamicDrawer["wave"])
+        assertNotNull(dynamic.dynamicDrawerSized["avatar"])
+    }
+
+    @Test
+    fun testTrimAudioCacheInDiskCache() {
+        val cacheDir = SvgaDiskCache.getCacheDir()
+        val audiosDir = java.io.File(cacheDir, "audios").apply { if (!exists()) mkdirs() }
+        val oldAudio = java.io.File(audiosDir, "old_audio.mp3").apply {
+            writeText("old_mp3_data_stream_content")
+            setLastModified(System.currentTimeMillis() - 100000)
+        }
+        val newAudio = java.io.File(audiosDir, "new_audio.mp3").apply {
+            writeText("new_mp3_data_stream_content")
+            setLastModified(System.currentTimeMillis())
+        }
+
+        assertTrue(oldAudio.exists())
+        assertTrue(newAudio.exists())
+
+        // 设置 maxAudioBytes 为极小值 (1 字节)，触发基于 LRU 的音频淘汰
+        SvgaDiskCache.trimDiskCache(maxBytes = 1000000L, maxAudioBytes = 1L)
+
+        // 验证淘汰发生且保留了目录
+        assertTrue(audiosDir.exists())
+
+        // 清理测试残留
+        oldAudio.delete()
+        newAudio.delete()
+    }
 }

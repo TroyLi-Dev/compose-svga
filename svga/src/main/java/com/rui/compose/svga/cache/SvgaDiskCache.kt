@@ -101,21 +101,40 @@ object SvgaDiskCache {
     /**
      * 自动淘汰超限的磁盘缓存（默认上限 256MB，淘汰至 75%）
      */
-    fun trimDiskCache(maxBytes: Long = 256 * 1024 * 1024L) {
+    fun trimDiskCache(
+        maxBytes: Long = 256 * 1024 * 1024L,
+        maxAudioBytes: Long = 64 * 1024 * 1024L
+    ) {
         try {
             val root = getCacheDir()
             if (!root.exists() || !root.isDirectory) return
             val dirs = root.listFiles()?.filter { it.isDirectory && it.name != "audios" } ?: return
             var totalSize = dirs.sumOf { dir -> dir.walkTopDown().filter { it.isFile }.sumOf { it.length() } }
-            if (totalSize <= maxBytes) return
+            if (totalSize > maxBytes) {
+                val sortedDirs = dirs.sortedBy { it.lastModified() }
+                val targetSize = (maxBytes * 0.75).toLong()
+                for (dir in sortedDirs) {
+                    val dirSize = dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+                    dir.deleteRecursively()
+                    totalSize -= dirSize
+                    if (totalSize <= targetSize) break
+                }
+            }
 
-            val sortedDirs = dirs.sortedBy { it.lastModified() }
-            val targetSize = (maxBytes * 0.75).toLong()
-            for (dir in sortedDirs) {
-                val dirSize = dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
-                dir.deleteRecursively()
-                totalSize -= dirSize
-                if (totalSize <= targetSize) break
+            val audioDir = File(root, "audios")
+            if (audioDir.exists() && audioDir.isDirectory) {
+                val audioFiles = audioDir.listFiles()?.filter { it.isFile } ?: emptyList()
+                var audioSize = audioFiles.sumOf { it.length() }
+                if (audioSize > maxAudioBytes) {
+                    val sortedFiles = audioFiles.sortedBy { it.lastModified() }
+                    val targetAudioSize = (maxAudioBytes * 0.75).toLong()
+                    for (file in sortedFiles) {
+                        val len = file.length()
+                        file.delete()
+                        audioSize -= len
+                        if (audioSize <= targetAudioSize) break
+                    }
+                }
             }
         } catch (_: Throwable) {}
     }

@@ -112,6 +112,7 @@ fun SvgaAnimation(
     val systemLoad = LocalSystemLoad.current
     var componentSize by remember { mutableStateOf(IntSize.Zero) }
 
+    @Suppress("DEPRECATION")
     val lifecycleOwner = LocalLifecycleOwner.current
     var isStarted by remember {
         mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
@@ -203,9 +204,9 @@ fun SvgaAnimation(
         }
     }
 
-    // 音频播放生命周期控制：暂停或置于后台时暂停音频，组件离开时彻底停播释放
-    DisposableEffect(videoEntity, isStop, isStarted) {
-        val entity = videoEntity ?: return@DisposableEffect onDispose {}
+    // 音频播放生命周期控制：暂停或置于后台时暂停音频，前台继续播放时恢复
+    LaunchedEffect(videoEntity, isStop, isStarted) {
+        val entity = videoEntity ?: return@LaunchedEffect
         val shouldPauseAudio = isStop || !isStarted
         if (shouldPauseAudio) {
             entity.audioList.forEach { audio ->
@@ -222,11 +223,18 @@ fun SvgaAnimation(
                 }
             }
         }
+    }
+
+    // 真正离开组件或切换动画实体时，才彻底停播释放音频流
+    DisposableEffect(videoEntity) {
+        val entity = videoEntity ?: return@DisposableEffect onDispose {}
         onDispose {
             entity.audioList.forEach { audio ->
                 audio.playID?.let { id ->
-                    if (SvgaSoundManager.isInit()) SvgaSoundManager.stop(id)
-                    else entity.soundPool?.stop(id)
+                    try {
+                        if (SvgaSoundManager.isInit()) SvgaSoundManager.stop(id)
+                        else entity.soundPool?.stop(id)
+                    } catch (_: Throwable) {}
                 }
                 audio.playID = null
             }
@@ -280,7 +288,7 @@ fun SvgaAnimation(
         val ctrl = controller ?: return@LaunchedEffect
         val entity = videoEntity ?: return@LaunchedEffect
         val targetFrame = ctrl.seekFrameTarget
-        val nominalFps = (if (entity.fps > 0) entity.fps else 30).coerceAtLeast(1)
+        val nominalFps = (if (entity.fps > 0) entity.fps else 30).coerceAtMost(maxFps).coerceAtLeast(1)
         val nominalFrameDurationNanos = 1_000_000_000L / nominalFps
 
         if (targetFrame != null) {
