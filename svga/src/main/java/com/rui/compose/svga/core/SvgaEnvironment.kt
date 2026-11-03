@@ -1,0 +1,134 @@
+package com.rui.compose.svga.core
+
+import android.os.Handler
+import android.os.Looper
+import android.view.Choreographer
+import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.State
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.staticCompositionLocalOf
+import com.rui.compose.svga.model.SystemLoad
+import java.util.concurrent.CopyOnWriteArraySet
+
+/**
+ * 全局系统负载状态 CompositionLocal（供调试或性能仪表盘读取）
+ */
+val LocalSystemLoad =
+    staticCompositionLocalOf<MutableState<SystemLoad>> { SvgaEnvironment.loadState }
+
+/**
+ * 全局统一中心化时钟 CompositionLocal
+ */
+val LocalSvgaClock = staticCompositionLocalOf<State<Long>> { SvgaEnvironment.tickState }
+
+/**
+ * 中心化高频刷新引擎（基于 Choreographer）
+ *
+ * 核心优化特性：
+ * 1. 统一驱动所有 Compose SVGA 组件，避免每个动画起独立协程/定时器产生线程上下文切换开销。
+ * 2. 引用计数与监听器双重探测：当没有任何可见或活跃动画时，立即注销 FrameCallback，CPU 占用彻底归零 (0% CPU)。
+ */
+internal object SvgaEnvironment {
+    private var refCount = 0
+    val tickState = mutableLongStateOf(System.nanoTime())
+    val loadState = mutableStateOf(SystemLoad())
+
+    private val listeners = CopyOnWriteArraySet<TickListener>()
+
+    @Volatile
+    private var isChoreographerScheduled = false
+
+    interface TickListener {
+        fun onTick(frameTimeNanos: Long)
+    }
+
+    private var lastFpsTime = 0L
+    private var frameCount = 0
+
+    private val frameCallback = object : Choreographer.FrameCallback {
+        override fun doFrame(frameTimeNanos: Long) {
+            isChoreographerScheduled = false
+            if (refCount <= 0 || listeners.isEmpty()) {
+                return // 无活跃监听，彻底休眠
+            }
+
+            tickState.longValue = frameTimeNanos
+
+            for (listener in listeners) {
+                listener.onTick(frameTimeNanos)
+            }
+
+            frameCount++
+            if (lastFpsTime == 0L) lastFpsTime = frameTimeNanos
+            if (frameTimeNanos - lastFpsTime >= 1_000_000_000L) {
+                loadState.value = SystemLoad(currentFps = frameCount)
+                frameCount = 0
+                lastFpsTime = frameTimeNanos
+            }
+
+            if (refCount > 0 && listeners.isNotEmpty()) {
+                isChoreographerScheduled = true
+                Choreographer.getInstance().postFrameCallback(this)
+            }
+        }
+    }
+
+    @Synchronized
+    fun addListener(listener: TickListener): Boolean {
+        val added = listeners.add(listener)
+        ensureChoreographerScheduled()
+        return added
+    }
+
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    @Synchronized
+    fun removeListener(listener: TickListener): Boolean {
+        val removed = listeners.remove(listener)
+        if (listeners.isEmpty() && isChoreographerScheduled) {
+            val unschedule = {
+                if (listeners.isEmpty() && isChoreographerScheduled) {
+                    Choreographer.getInstance().removeFrameCallback(frameCallback)
+                    isChoreographerScheduled = false
+                }
+            }
+            if (Looper.myLooper() == Looper.getMainLooper()) unschedule() else mainHandler.post(unschedule)
+        }
+        return removed
+    }
+
+    @Synchronized
+    fun attach() {
+        refCount++
+        ensureChoreographerScheduled()
+    }
+
+    @Synchronized
+    fun detach() {
+        if (refCount > 0) refCount--
+        if (refCount <= 0 && isChoreographerScheduled) {
+            val unschedule = {
+                if (refCount <= 0 && isChoreographerScheduled) {
+                    Choreographer.getInstance().removeFrameCallback(frameCallback)
+                    isChoreographerScheduled = false
+                }
+            }
+            if (Looper.myLooper() == Looper.getMainLooper()) unschedule() else mainHandler.post(unschedule)
+        }
+    }
+
+    private fun ensureChoreographerScheduled() {
+        if (refCount > 0 && listeners.isNotEmpty() && !isChoreographerScheduled) {
+            val schedule = {
+                if (refCount > 0 && listeners.isNotEmpty() && !isChoreographerScheduled) {
+                    isChoreographerScheduled = true
+                    lastFpsTime = 0L
+                    frameCount = 0
+                    Choreographer.getInstance().postFrameCallback(frameCallback)
+                }
+            }
+            if (Looper.myLooper() == Looper.getMainLooper()) schedule() else mainHandler.post(schedule)
+        }
+    }
+}

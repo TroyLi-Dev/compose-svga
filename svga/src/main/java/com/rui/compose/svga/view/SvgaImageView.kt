@@ -1,0 +1,343 @@
+package com.rui.compose.svga.view
+
+import android.animation.Animator
+import android.animation.ValueAnimator
+import android.annotation.SuppressLint
+import android.content.Context
+import android.util.AttributeSet
+import android.view.MotionEvent
+import android.view.animation.LinearInterpolator
+import android.widget.ImageView
+import com.rui.compose.svga.R
+import com.rui.compose.svga.drawer.SvgaDynamicEntity
+import com.rui.compose.svga.entity.SvgaVideoEntity
+import com.rui.compose.svga.parser.SvgaParser
+import com.rui.compose.svga.utils.SvgaRange
+import com.rui.compose.svga.utils.log.LogUtils
+import com.rui.compose.svga.utils.log.SvgaLogger
+import java.lang.ref.WeakReference
+import kotlin.math.max
+import kotlin.math.min
+
+/**
+ * 现代化的标准 Android View SVGA 播放组件
+ *
+ * 核心特性：
+ * 1. 与 Compose 版统一共享底层高性能 [SvgaParser]、双级缓存与 [SvgaCanvasDrawer]。
+ * 2. 彻底治理生命周期管理，在 [onDetachedFromWindow] 时自动释放动画与任务，杜绝内存泄漏。
+ * 3. 支持 XML 属性布局配置与一键式 [load] 方法。
+ */
+open class SvgaImageView @JvmOverloads constructor(
+    context: Context,
+    attrs: AttributeSet? = null,
+    defStyleAttr: Int = 0
+) : ImageView(context, attrs, defStyleAttr) {
+
+    private val TAG = "SvgaImageView"
+
+    var isAnimating = false
+        private set
+
+    var loops = 0
+    var clearsAfterStop = false
+    var clearsAfterDetached = false
+    var fillMode: SvgaFillMode = SvgaFillMode.Forward
+    var callback: SvgaCallback? = null
+
+    private var autoPlay = true
+    private var antiAlias = true
+    private var startFrame = 0
+    private var endFrame = 0
+
+    private var animator: ValueAnimator? = null
+    private var currentParseCancelTask: (() -> Unit)? = null
+    private var itemClickAreaListener: SvgaItemClickListener? = null
+
+    private val animatorListener = SvgaAnimatorListener(this)
+    private val animatorUpdateListener = SvgaAnimatorUpdateListener(this)
+
+    init {
+        val appCtx = context.applicationContext ?: context
+        com.rui.compose.svga.cache.SvgaDiskCache.init(appCtx)
+        com.rui.compose.svga.utils.SvgaMemoryCalculator.instance.init(appCtx)
+        attrs?.let { loadAttrs(it) }
+    }
+
+    private fun loadAttrs(attrs: AttributeSet) {
+        val typedArray = context.theme.obtainStyledAttributes(
+            attrs,
+            R.styleable.SvgaImageView,
+            0,
+            0
+        )
+        try {
+            loops = typedArray.getInt(R.styleable.SvgaImageView_loopCount, 0)
+            clearsAfterStop = typedArray.getBoolean(R.styleable.SvgaImageView_clearsAfterStop, false)
+            clearsAfterDetached = typedArray.getBoolean(R.styleable.SvgaImageView_clearsAfterDetached, false)
+            antiAlias = typedArray.getBoolean(R.styleable.SvgaImageView_antiAlias, true)
+            autoPlay = typedArray.getBoolean(R.styleable.SvgaImageView_autoPlay, true)
+
+            when (typedArray.getInt(R.styleable.SvgaImageView_fillMode, 1)) {
+                0 -> fillMode = SvgaFillMode.Backward
+                1 -> fillMode = SvgaFillMode.Forward
+                2 -> fillMode = SvgaFillMode.Clear
+            }
+
+            typedArray.getString(R.styleable.SvgaImageView_source)?.let { source ->
+                load(source)
+            }
+        } finally {
+            typedArray.recycle()
+        }
+    }
+
+    /**
+     * 智能异步加载并播放资源（支持 URL、本地绝对路径、Assets 路径、File 对象、Raw 资源）
+     */
+    fun load(source: Any, onComplete: ((SvgaVideoEntity) -> Unit)? = null) {
+        currentParseCancelTask?.invoke()
+        val cacheKey = com.rui.compose.svga.cache.SvgaDiskCache.buildCacheKeyForModel(source)
+        val cached = com.rui.compose.svga.cache.SvgaMemoryCache.instance.get(cacheKey)
+        if (cached != null) {
+            cached.antiAlias = antiAlias
+            setVideoItem(cached)
+            onComplete?.invoke(cached)
+            if (autoPlay) {
+                startAnimation()
+            }
+            return
+        }
+        val parser = SvgaParser(context)
+        val cancelTask = parser.decodeAuto(source, object : SvgaParser.ParseCompletion {
+            override fun onComplete(videoItem: SvgaVideoEntity) {
+                post {
+                    videoItem.antiAlias = antiAlias
+                    setVideoItem(videoItem)
+                    onComplete?.invoke(videoItem)
+                    if (autoPlay) {
+                        startAnimation()
+                    }
+                }
+            }
+
+            override fun onError(e: Exception, alias: String) {
+                LogUtils.error(TAG, "Load SVGA failed for: $source", e)
+            }
+        })
+        currentParseCancelTask = cancelTask
+    }
+
+    fun setVideoItem(videoItem: SvgaVideoEntity?) {
+        setVideoItem(videoItem, SvgaDynamicEntity())
+    }
+
+    fun setVideoItem(videoItem: SvgaVideoEntity?, dynamicItem: SvgaDynamicEntity?) {
+        if (videoItem == null) {
+            setImageDrawable(null)
+        } else {
+            val drawable = SvgaDrawable(videoItem, dynamicItem ?: SvgaDynamicEntity()).apply {
+                this.scaleType = this@SvgaImageView.scaleType
+                this.cleared = true
+            }
+            setImageDrawable(drawable)
+        }
+    }
+
+    fun startAnimation() {
+        startAnimation(null, false)
+    }
+
+    fun startAnimation(range: SvgaRange?, reverse: Boolean = false) {
+        stopAnimation(false)
+        val drawable = getSvgaDrawable() ?: return
+        drawable.cleared = false
+        drawable.scaleType = scaleType
+
+        val videoItem = drawable.videoEntity
+        if (videoItem.frames <= 0) return
+
+        startFrame = max(0, range?.location ?: 0)
+        endFrame = min(
+            videoItem.frames - 1,
+            ((range?.location ?: 0) + (range?.length ?: Int.MAX_VALUE) - 1)
+        )
+        if (startFrame > endFrame) return
+
+        val fps = max(1, videoItem.fps)
+        val durationMs = ((endFrame - startFrame + 1) * 1000L / fps)
+
+        animator = ValueAnimator.ofInt(startFrame, endFrame).apply {
+            duration = durationMs
+            interpolator = LinearInterpolator()
+            repeatCount = if (loops <= 0) ValueAnimator.INFINITE else loops - 1
+            addUpdateListener(animatorUpdateListener)
+            addListener(animatorListener)
+            if (reverse) reverse() else start()
+        }
+    }
+
+    fun pauseAnimation() {
+        stopAnimation(false)
+        callback?.onPause()
+    }
+
+    fun stopAnimation() {
+        stopAnimation(clearsAfterStop)
+    }
+
+    fun stopAnimation(clear: Boolean) {
+        animator?.apply {
+            cancel()
+            removeAllListeners()
+            removeAllUpdateListeners()
+        }
+        animator = null
+        isAnimating = false
+        getSvgaDrawable()?.apply {
+            stop()
+            cleared = clear
+        }
+    }
+
+    fun stepToFrame(frame: Int, andPlay: Boolean = false) {
+        pauseAnimation()
+        val drawable = getSvgaDrawable() ?: return
+        val targetFrame = frame.coerceIn(0, max(0, drawable.videoEntity.frames - 1))
+        drawable.currentFrame = targetFrame
+        if (andPlay) {
+            startAnimation()
+            animator?.let { anim ->
+                val ratio = targetFrame.toFloat() / max(1, drawable.videoEntity.frames)
+                anim.currentPlayTime = (ratio * anim.duration).toLong()
+            }
+        }
+    }
+
+    fun stepToPercentage(percentage: Double, andPlay: Boolean = false) {
+        val drawable = getSvgaDrawable() ?: return
+        val totalFrames = drawable.videoEntity.frames
+        val frame = (totalFrames * percentage).toInt().coerceIn(0, max(0, totalFrames - 1))
+        stepToFrame(frame, andPlay)
+    }
+
+    fun clear() {
+        stopAnimation(true)
+        setImageDrawable(null)
+    }
+
+    fun clearSVGADrawable() {
+        clear()
+    }
+
+    fun resetit() {
+        currentParseCancelTask?.invoke()
+        currentParseCancelTask = null
+        clear()
+        loops = 0
+        clearsAfterStop = false
+        clearsAfterDetached = false
+        fillMode = SvgaFillMode.Forward
+        callback = null
+        itemClickAreaListener = null
+    }
+
+    fun setOnAnimKeyClickListener(clickListener: SvgaItemClickListener) {
+        itemClickAreaListener = clickListener
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    override fun onTouchEvent(event: MotionEvent?): Boolean {
+        if (event?.action != MotionEvent.ACTION_DOWN) {
+            return super.onTouchEvent(event)
+        }
+        val drawable = getSvgaDrawable() ?: return super.onTouchEvent(event)
+        for ((key, value) in drawable.dynamicEntity.clickMap) {
+            if (event.x >= value[0] && event.x <= value[2] && event.y >= value[1] && event.y <= value[3]) {
+                itemClickAreaListener?.let {
+                    it.onClick(key)
+                    return true
+                }
+            }
+        }
+        return super.onTouchEvent(event)
+    }
+
+    private var wasAnimatingBeforeHide = false
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        if (autoPlay && getSvgaDrawable() != null && !isAnimating) {
+            startAnimation()
+        }
+    }
+
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        if (visibility == VISIBLE) {
+            if (wasAnimatingBeforeHide) {
+                wasAnimatingBeforeHide = false
+                if (animator?.isPaused == true) {
+                    animator?.resume()
+                    isAnimating = true
+                } else if (!isAnimating) {
+                    startAnimation()
+                }
+            }
+        } else {
+            if (isAnimating) {
+                wasAnimatingBeforeHide = true
+                animator?.pause()
+                getSvgaDrawable()?.stop()
+                isAnimating = false
+            }
+        }
+    }
+
+    override fun onDetachedFromWindow() {
+        super.onDetachedFromWindow()
+        currentParseCancelTask?.invoke()
+        currentParseCancelTask = null
+        stopAnimation(clearsAfterDetached)
+        if (clearsAfterDetached) {
+            clear()
+        }
+    }
+
+    private fun getSvgaDrawable(): SvgaDrawable? = drawable as? SvgaDrawable
+
+    private fun handleAnimationUpdate(anim: ValueAnimator) {
+        val drawable = getSvgaDrawable() ?: return
+        val frame = anim.animatedValue as? Int ?: return
+        drawable.currentFrame = frame
+        val totalFrames = drawable.videoEntity.frames
+        val percentage = if (totalFrames > 0) (frame + 1).toDouble() / totalFrames else 0.0
+        callback?.onStep(frame, percentage)
+    }
+
+    private fun handleAnimationEnd() {
+        isAnimating = false
+        stopAnimation(clearsAfterStop)
+        val drawable = getSvgaDrawable()
+        if (drawable != null) {
+            when (fillMode) {
+                SvgaFillMode.Backward -> drawable.currentFrame = startFrame
+                SvgaFillMode.Forward -> drawable.currentFrame = endFrame
+                SvgaFillMode.Clear -> drawable.cleared = true
+            }
+        }
+        callback?.onFinished()
+    }
+
+    private class SvgaAnimatorListener(view: SvgaImageView) : Animator.AnimatorListener {
+        private val ref = WeakReference(view)
+        override fun onAnimationRepeat(animation: Animator) { ref.get()?.callback?.onRepeat() }
+        override fun onAnimationEnd(animation: Animator) { ref.get()?.handleAnimationEnd() }
+        override fun onAnimationCancel(animation: Animator) { ref.get()?.isAnimating = false }
+        override fun onAnimationStart(animation: Animator) { ref.get()?.isAnimating = true }
+    }
+
+    private class SvgaAnimatorUpdateListener(view: SvgaImageView) : ValueAnimator.AnimatorUpdateListener {
+        private val ref = WeakReference(view)
+        override fun onAnimationUpdate(animation: ValueAnimator) { ref.get()?.handleAnimationUpdate(animation) }
+    }
+}

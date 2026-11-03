@@ -6,10 +6,10 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 android {
-    namespace = "com.rui.composes.svga"
+    namespace = "com.rui.compose.svga.app"
     compileSdk = 36
     defaultConfig {
-        applicationId = "com.rui.composes.svga"
+        applicationId = "com.rui.compose.svga"
         minSdk = 24
         versionCode = 1
         versionName = "1.0"
@@ -62,5 +62,6 @@ dependencies {
     implementation(libs.coil.compose)
     implementation("androidx.navigation:navigation-compose:2.7.7")
 
+    testImplementation(libs.junit)
     debugImplementation(libs.leakcanary.android)
 }

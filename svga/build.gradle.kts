@@ -4,11 +4,12 @@ plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    id("com.squareup.wire") version "5.4.0"
     id("maven-publish")
 }
 
 android {
-    namespace = "com.rui.composes.svga"
+    namespace = "com.rui.compose.svga"
     compileSdk = 36
     defaultConfig {
         minSdk = 21
@@ -29,6 +30,19 @@ android {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
+
+    publishing {
+        singleVariant("release")
+    }
+}
+
+wire {
+    sourcePath {
+        srcDir("src/main/proto")
+    }
+    kotlin {
+        android = true
+    }
 }
 
 publishing {
@@ -36,7 +50,7 @@ publishing {
         create<MavenPublication>("release") {
             groupId = "com.github.TroyLi-Dev"
             artifactId = "compose-svga"
-            version = project.version as String? ?: "unspecified"
+            version = project.findProperty("version")?.toString()?.takeIf { it != "unspecified" } ?: "1.0.1-rc01"
             afterEvaluate {
                 from(components["release"])
             }
