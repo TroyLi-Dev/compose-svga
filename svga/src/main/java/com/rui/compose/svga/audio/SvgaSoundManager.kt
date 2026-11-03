@@ -19,17 +19,22 @@ object SvgaSoundManager {
     private val soundCallbackMap = ConcurrentHashMap<Int, WeakReference<SvgaSoundCallback>>()
     private var volume: Float = 1f
 
+    @Synchronized
     fun init(maxStreams: Int = 20) {
         LogUtils.debug(TAG, "init maxStreams=$maxStreams")
         if (soundPool != null) return
         soundPool = createSoundPool(maxStreams).apply {
             setOnLoadCompleteListener { _, soundId, status ->
                 LogUtils.debug(TAG, "SoundPool onLoadComplete soundId=$soundId status=$status")
+                if (status != 0) {
+                    LogUtils.warn(TAG, "SoundPool sample load failed status=$status soundId=$soundId")
+                }
                 soundCallbackMap[soundId]?.get()?.onComplete()
             }
         }
     }
 
+    @Synchronized
     fun release() {
         LogUtils.debug(TAG, "release")
         soundCallbackMap.clear()

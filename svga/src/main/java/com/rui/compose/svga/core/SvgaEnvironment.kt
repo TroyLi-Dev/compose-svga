@@ -97,7 +97,9 @@ internal object SvgaEnvironment {
         if (listeners.isEmpty() && isChoreographerScheduled) {
             val unschedule = {
                 if (listeners.isEmpty() && isChoreographerScheduled) {
-                    Choreographer.getInstance().removeFrameCallback(frameCallback)
+                    try {
+                        Choreographer.getInstance().removeFrameCallback(frameCallback)
+                    } catch (_: Throwable) {}
                     isChoreographerScheduled = false
                 }
             }
@@ -113,7 +115,12 @@ internal object SvgaEnvironment {
                     isChoreographerScheduled = true
                     lastFpsTime = 0L
                     frameCount = 0
-                    Choreographer.getInstance().postFrameCallback(frameCallback)
+                    try {
+                        Choreographer.getInstance().postFrameCallback(frameCallback)
+                    } catch (t: Throwable) {
+                        isChoreographerScheduled = false
+                        com.rui.compose.svga.utils.log.LogUtils.error("SvgaEnvironment", "Failed to schedule Choreographer callback", t)
+                    }
                 }
             }
             if (Looper.myLooper() == Looper.getMainLooper()) schedule() else mainHandler.post(schedule)

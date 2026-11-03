@@ -516,19 +516,23 @@ class SvgaCanvasDrawer(
                     path.transform(shapeMatrix)
 
                     shape.styles?.fill?.let { color ->
-                        if (color != 0x00000000) {
+                        val colorAlpha = (color ushr 24) and 0xFF
+                        if (colorAlpha > 0 && alpha > 0) {
                             paint.style = Paint.Style.FILL
                             paint.color = color
-                            if (alpha != 255) paint.alpha = alpha
+                            val finalAlpha = if (alpha == 255) colorAlpha else ((colorAlpha * alpha) / 255)
+                            paint.alpha = finalAlpha
                             canvas.drawPath(path, paint)
                         }
                     }
                     shape.styles?.strokeWidth?.let { width ->
-                        if (width > 0) {
+                        if (width > 0 && alpha > 0) {
                             paint.style = Paint.Style.STROKE
                             shape.styles?.stroke?.let { color ->
+                                val colorAlpha = (color ushr 24) and 0xFF
                                 paint.color = color
-                                if (alpha != 255) paint.alpha = alpha
+                                val finalAlpha = if (alpha == 255) colorAlpha else ((colorAlpha * alpha) / 255)
+                                paint.alpha = finalAlpha
                             }
                             val scale = matrixScale(frameMatrix)
                             paint.strokeWidth = width * scale

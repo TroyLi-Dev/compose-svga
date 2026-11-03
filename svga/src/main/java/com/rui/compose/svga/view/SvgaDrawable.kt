@@ -49,14 +49,23 @@ open class SvgaDrawable(
 
     private var alphaVal = 255
     private var colorFilterVal: ColorFilter? = null
+    private val layerPaint = android.graphics.Paint()
 
     override fun draw(canvas: Canvas) {
         if (cleared) return
         val w = if (bounds.width() > 0) bounds.width().toFloat() else videoEntity.videoSize.width.toFloat()
         val h = if (bounds.height() > 0) bounds.height().toFloat() else videoEntity.videoSize.height.toFloat()
         if (w <= 0f || h <= 0f) return
-        val saveCount = if (alphaVal < 255) {
-            canvas.saveLayerAlpha(bounds.left.toFloat(), bounds.top.toFloat(), bounds.left.toFloat() + w, bounds.top.toFloat() + h, alphaVal)
+        val saveCount = if (alphaVal < 255 || colorFilterVal != null) {
+            layerPaint.alpha = alphaVal
+            layerPaint.colorFilter = colorFilterVal
+            canvas.saveLayer(
+                bounds.left.toFloat(),
+                bounds.top.toFloat(),
+                bounds.left.toFloat() + w,
+                bounds.top.toFloat() + h,
+                layerPaint
+            )
         } else {
             canvas.save()
         }

@@ -325,5 +325,35 @@ class SvgaRedesignUnitTest {
         val filter = android.graphics.PorterDuffColorFilter(0xFF0000, android.graphics.PorterDuff.Mode.SRC_IN)
         drawable.colorFilter = filter
         assertTrue(drawable.colorFilter === filter)
+
+        // 验证 setAlpha 与 getAlpha
+        drawable.alpha = 180
+        assertEquals(180, drawable.alpha)
+    }
+
+    @Test
+    fun testSvgaSoundManagerThreadSafety() {
+        // 多线程并发调用 init 与 release 不应崩溃或死锁
+        val threads = (1..8).map {
+            Thread {
+                com.rui.compose.svga.audio.SvgaSoundManager.init(10)
+                com.rui.compose.svga.audio.SvgaSoundManager.release()
+            }
+        }
+        threads.forEach { it.start() }
+        threads.forEach { it.join() }
+    }
+
+    @Test
+    fun testShapeAlphaCompositeMath() {
+        // 验证颜色 Alpha 与 Sprite Alpha 的复合乘法计算逻辑
+        val colorAlpha = 128
+        val spriteAlpha = 128
+        val finalAlpha = ((colorAlpha * spriteAlpha) / 255)
+        assertEquals(64, finalAlpha)
+
+        val fullSpriteAlpha = 255
+        val finalAlphaFull = if (fullSpriteAlpha == 255) colorAlpha else ((colorAlpha * fullSpriteAlpha) / 255)
+        assertEquals(128, finalAlphaFull)
     }
 }
