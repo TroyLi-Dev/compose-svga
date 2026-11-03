@@ -83,8 +83,7 @@ open class SvgaDrawable(
         return if (h > 0) h else -1
     }
 
-    @Suppress("DeprecatedCallableAddReplaceWith")
-    @Deprecated("Deprecated in Java", ReplaceWith("PixelFormat.TRANSLUCENT"))
+    @Deprecated("Deprecated in Java")
     override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
 
     fun resume() {

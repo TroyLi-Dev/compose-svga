@@ -70,6 +70,7 @@ dependencies {
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.foundation)
     implementation(libs.androidx.compose.runtime)
+    implementation(libs.androidx.lifecycle.runtime.compose)
 
     // SVGA 核心依赖
     implementation(libs.wire.runtime)

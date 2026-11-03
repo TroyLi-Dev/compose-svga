@@ -25,11 +25,11 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.IntSize
 import androidx.core.graphics.withSave
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.rui.compose.svga.audio.SvgaSoundManager
 import com.rui.compose.svga.cache.SvgaDiskCache
 import com.rui.compose.svga.cache.SvgaMemoryCache
@@ -112,7 +112,6 @@ fun SvgaAnimation(
     val systemLoad = LocalSystemLoad.current
     var componentSize by remember { mutableStateOf(IntSize.Zero) }
 
-    @Suppress("DEPRECATION")
     val lifecycleOwner = LocalLifecycleOwner.current
     var isStarted by remember {
         mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
