@@ -169,12 +169,14 @@ class SvgaVideoEntity {
     }
 
     /**
-     * 在后台准备阶段预先编译解析矢量 Shape Path，彻底避免在 120FPS 渲染主线程中解析 SVG 字符串
+     * 在后台准备阶段预先编译解析矢量 Shape Path 和 Mask Path，彻底避免在 120FPS 渲染主线程中解析 SVG 字符串
      */
     private fun precompileShapePaths() {
         try {
+            val dummyPath = android.graphics.Path()
             spriteList.forEach { sprite ->
                 sprite.frames.forEach { frame ->
+                    frame.maskPath?.buildPath(dummyPath)
                     frame.shapes.forEach { shape ->
                         shape.buildPath()
                     }

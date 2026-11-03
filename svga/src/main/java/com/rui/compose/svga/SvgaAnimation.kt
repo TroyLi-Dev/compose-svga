@@ -2,6 +2,7 @@ package com.rui.compose.svga
 
 import android.widget.ImageView
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -20,6 +21,7 @@ import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
@@ -96,6 +98,7 @@ fun SvgaAnimation(
     onError: (Throwable) -> Unit = {},
     onStep: (frame: Int, percentage: Double) -> Unit = { _, _ -> },
     onFinished: () -> Unit = {},
+    onItemClick: ((key: String) -> Unit)? = null,
     loading: @Composable (() -> Unit)? = null,
     failure: @Composable (() -> Unit)? = null
 ) {
@@ -384,10 +387,30 @@ fun SvgaAnimation(
         onDispose { SvgaEnvironment.removeListener(tickListener) }
     }
 
+    val currentOnItemClick by rememberUpdatedState(onItemClick)
+    val clickModifier = if (onItemClick != null) {
+        Modifier.pointerInput(dynamicEntity, currentOnItemClick) {
+            detectTapGestures { offset ->
+                val dynamic = dynamicEntity ?: return@detectTapGestures
+                for ((key, value) in dynamic.clickMap) {
+                    val minX = kotlin.math.min(value[0], value[2])
+                    val maxX = kotlin.math.max(value[0], value[2])
+                    val minY = kotlin.math.min(value[1], value[3])
+                    val maxY = kotlin.math.max(value[1], value[3])
+                    if (offset.x >= minX && offset.x <= maxX && offset.y >= minY && offset.y <= maxY) {
+                        currentOnItemClick?.invoke(key)
+                        break
+                    }
+                }
+            }
+        }
+    } else Modifier
+
     Box(
         modifier = modifier
             .graphicsLayer { clip = true }
-            .onSizeChanged { componentSize = it },
+            .onSizeChanged { componentSize = it }
+            .then(clickModifier),
         contentAlignment = Alignment.Center
     ) {
         if (loadState == SvgaLoadState.Loading) loading?.invoke()
@@ -436,6 +459,7 @@ fun SvgaAnimation(
     onError: (Throwable) -> Unit = {},
     onStep: (frame: Int, percentage: Double) -> Unit = { _, _ -> },
     onFinished: () -> Unit = {},
+    onItemClick: ((key: String) -> Unit)? = null,
     loading: @Composable (() -> Unit)? = null,
     failure: @Composable (() -> Unit)? = null,
     dynamicBuilder: SvgaDynamicEntity.() -> Unit
@@ -460,6 +484,7 @@ fun SvgaAnimation(
         onError = onError,
         onStep = onStep,
         onFinished = onFinished,
+        onItemClick = onItemClick,
         loading = loading,
         failure = failure
     )
@@ -480,6 +505,7 @@ fun SvgaAnimation(
     onError: (Throwable) -> Unit = {},
     onStep: (frame: Int, percentage: Double) -> Unit = { _, _ -> },
     onFinished: () -> Unit = {},
+    onItemClick: ((key: String) -> Unit)? = null,
     loading: @Composable (() -> Unit)? = null,
     failure: @Composable (() -> Unit)? = null
 ) {
@@ -519,6 +545,7 @@ fun SvgaAnimation(
             controller.playState = SvgaPlayState.Finished
             onFinished()
         },
+        onItemClick = onItemClick,
         loading = loading,
         failure = failure
     )
@@ -538,6 +565,7 @@ fun SvgaAnimation(
     onError: (Throwable) -> Unit = {},
     onStep: (frame: Int, percentage: Double) -> Unit = { _, _ -> },
     onFinished: () -> Unit = {},
+    onItemClick: ((key: String) -> Unit)? = null,
     loading: @Composable (() -> Unit)? = null,
     failure: @Composable (() -> Unit)? = null,
     dynamicBuilder: SvgaDynamicEntity.() -> Unit
@@ -556,6 +584,7 @@ fun SvgaAnimation(
         onError = onError,
         onStep = onStep,
         onFinished = onFinished,
+        onItemClick = onItemClick,
         loading = loading,
         failure = failure
     )

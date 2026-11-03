@@ -28,6 +28,7 @@ fun SvgaPlayer(
     onError: (Throwable) -> Unit = {},
     onStep: (frame: Int, percentage: Double) -> Unit = { _, _ -> },
     onFinished: () -> Unit = {},
+    onItemClick: ((key: String) -> Unit)? = null,
     loading: @Composable (() -> Unit)? = null,
     failure: @Composable (() -> Unit)? = null
 ) = SvgaAnimation(
@@ -46,6 +47,7 @@ fun SvgaPlayer(
     onError = onError,
     onStep = onStep,
     onFinished = onFinished,
+    onItemClick = onItemClick,
     loading = loading,
     failure = failure
 )
@@ -65,6 +67,7 @@ fun SvgaPlayer(
     onError: (Throwable) -> Unit = {},
     onStep: (frame: Int, percentage: Double) -> Unit = { _, _ -> },
     onFinished: () -> Unit = {},
+    onItemClick: ((key: String) -> Unit)? = null,
     loading: @Composable (() -> Unit)? = null,
     failure: @Composable (() -> Unit)? = null
 ) = SvgaAnimation(
@@ -78,6 +81,7 @@ fun SvgaPlayer(
     onError = onError,
     onStep = onStep,
     onFinished = onFinished,
+    onItemClick = onItemClick,
     loading = loading,
     failure = failure
 )
@@ -101,6 +105,7 @@ fun SvgaPlayer(
     onError: (Throwable) -> Unit = {},
     onStep: (frame: Int, percentage: Double) -> Unit = { _, _ -> },
     onFinished: () -> Unit = {},
+    onItemClick: ((key: String) -> Unit)? = null,
     loading: @Composable (() -> Unit)? = null,
     failure: @Composable (() -> Unit)? = null,
     dynamicBuilder: SvgaDynamicEntity.() -> Unit
@@ -119,6 +124,7 @@ fun SvgaPlayer(
     onError = onError,
     onStep = onStep,
     onFinished = onFinished,
+    onItemClick = onItemClick,
     loading = loading,
     failure = failure,
     dynamicBuilder = dynamicBuilder
@@ -138,6 +144,7 @@ fun SvgaPlayer(
     onError: (Throwable) -> Unit = {},
     onStep: (frame: Int, percentage: Double) -> Unit = { _, _ -> },
     onFinished: () -> Unit = {},
+    onItemClick: ((key: String) -> Unit)? = null,
     loading: @Composable (() -> Unit)? = null,
     failure: @Composable (() -> Unit)? = null,
     dynamicBuilder: SvgaDynamicEntity.() -> Unit
@@ -151,6 +158,7 @@ fun SvgaPlayer(
     onError = onError,
     onStep = onStep,
     onFinished = onFinished,
+    onItemClick = onItemClick,
     loading = loading,
     failure = failure,
     dynamicBuilder = dynamicBuilder
