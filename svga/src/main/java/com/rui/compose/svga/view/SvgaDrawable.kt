@@ -39,10 +39,16 @@ open class SvgaDrawable(
         }
 
     var scaleType: ImageView.ScaleType = ImageView.ScaleType.FIT_CENTER
+        set(value) {
+            if (field == value) return
+            field = value
+            invalidateSelf()
+        }
 
     private val drawer = SvgaCanvasDrawer(videoEntity, dynamicEntity)
 
     private var alphaVal = 255
+    private var colorFilterVal: ColorFilter? = null
 
     override fun draw(canvas: Canvas) {
         if (cleared) return
@@ -71,7 +77,15 @@ open class SvgaDrawable(
     }
 
     override fun getAlpha(): Int = alphaVal
-    override fun setColorFilter(colorFilter: ColorFilter?) {}
+
+    override fun setColorFilter(colorFilter: ColorFilter?) {
+        if (this.colorFilterVal != colorFilter) {
+            this.colorFilterVal = colorFilter
+            invalidateSelf()
+        }
+    }
+
+    override fun getColorFilter(): ColorFilter? = colorFilterVal
 
     override fun getIntrinsicWidth(): Int {
         val w = videoEntity.videoSize.width.toInt()

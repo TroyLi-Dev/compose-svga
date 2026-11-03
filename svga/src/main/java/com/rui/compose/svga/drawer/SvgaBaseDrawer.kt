@@ -1,7 +1,6 @@
 package com.rui.compose.svga.drawer
 
 import android.graphics.Canvas
-import android.graphics.Rect
 import android.widget.ImageView
 import com.rui.compose.svga.entity.SvgaVideoEntity
 import com.rui.compose.svga.entity.SvgaVideoSpriteFrameEntity
@@ -11,7 +10,6 @@ import kotlin.math.max
 abstract class SvgaBaseDrawer(val videoItem: SvgaVideoEntity) {
 
     val scaleInfo = SvgaScaleInfo()
-    private val clipRect = Rect()
 
     private val spritePool = Pools.SimplePool<SvgaDrawerSprite>(max(1, videoItem.spriteList.size))
     private val frameSpritesList = ArrayList<SvgaDrawerSprite>(max(1, videoItem.spriteList.size))
@@ -80,8 +78,7 @@ abstract class SvgaBaseDrawer(val videoItem: SvgaVideoEntity) {
         if (overrideWidth != null && overrideHeight != null) {
             drawWidth = kotlin.math.max(1f, overrideWidth)
             drawHeight = kotlin.math.max(1f, overrideHeight)
-            clipRect.set(0, 0, drawWidth.toInt(), drawHeight.toInt())
-            canvas.clipRect(clipRect)
+            canvas.clipRect(0f, 0f, drawWidth, drawHeight)
         } else {
             drawWidth = canvas.width.toFloat()
             drawHeight = canvas.height.toFloat()

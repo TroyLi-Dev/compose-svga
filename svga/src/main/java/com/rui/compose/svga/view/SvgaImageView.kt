@@ -132,6 +132,7 @@ open class SvgaImageView @JvmOverloads constructor(
         val oldDrawable = getSvgaDrawable()
         if (oldDrawable != null && oldDrawable !== drawable) {
             stopAnimation(false)
+            oldDrawable.clear()
         }
         super.setImageDrawable(drawable)
         (drawable as? SvgaDrawable)?.scaleType = this.scaleType

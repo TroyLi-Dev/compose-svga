@@ -309,4 +309,21 @@ class SvgaRedesignUnitTest {
         val reason = com.rui.compose.svga.exception.DecodeReason.STREAM_OVERFLOW
         assertEquals("STREAM_OVERFLOW", reason.name)
     }
+
+    @Test
+    fun testSvgaDrawableScaleTypeAndColorFilter() {
+        val movieEntity = com.rui.compose.svga.proto.MovieEntity()
+        val videoEntity = com.rui.compose.svga.entity.SvgaVideoEntity(movieEntity, java.io.File("/tmp"))
+        val drawable = com.rui.compose.svga.view.SvgaDrawable(videoEntity)
+
+        // 验证 scaleType 赋值正常
+        drawable.scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+        assertEquals(android.widget.ImageView.ScaleType.CENTER_CROP, drawable.scaleType)
+
+        // 验证 colorFilter 获取与设置遵循标准 Drawable 契约
+        assertNull(drawable.colorFilter)
+        val filter = android.graphics.PorterDuffColorFilter(0xFF0000, android.graphics.PorterDuff.Mode.SRC_IN)
+        drawable.colorFilter = filter
+        assertTrue(drawable.colorFilter === filter)
+    }
 }

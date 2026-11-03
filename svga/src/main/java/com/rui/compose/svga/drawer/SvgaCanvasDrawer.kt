@@ -66,8 +66,8 @@ class SvgaCanvasDrawer(
                 }
             }
 
-            val drawWidth = (overrideWidth ?: canvas.width.toFloat()).coerceIn(1f, 4096f)
-            val drawHeight = (overrideHeight ?: canvas.height.toFloat()).coerceIn(1f, 4096f)
+            val drawWidth = (overrideWidth ?: canvas.width.toFloat()).coerceAtLeast(1f)
+            val drawHeight = (overrideHeight ?: canvas.height.toFloat()).coerceAtLeast(1f)
 
             sprites.forEachIndexed { index, svgaDrawerSprite ->
                 svgaDrawerSprite.imageKey?.let {
@@ -697,8 +697,8 @@ class SvgaCanvasDrawer(
         }
 
         fun obtainMatteCanvas(width: Int, height: Int): Canvas? {
-            val w = width.coerceIn(1, 4096)
-            val h = height.coerceIn(1, 4096)
+            val w = width.coerceIn(1, 8192)
+            val h = height.coerceIn(1, 8192)
             var bmp = sharedMatteBitmap
             if (bmp == null || bmp.isRecycled || bmp.width < w || bmp.height < h) {
                 try {
