@@ -281,11 +281,13 @@ fun SvgaAnimation(
     var lastTickTimeNanos by remember(cacheKey) { mutableLongStateOf(0L) }
     var lastRenderNanos by remember(cacheKey) { mutableLongStateOf(0L) }
     var isFinished by remember(cacheKey) { mutableStateOf(false) }
+    var redrawTrigger by remember(cacheKey) { mutableIntStateOf(0) }
 
-    // 响应 Controller 命令控制（跳转、重播、停止）
+    // 响应 Controller 命令控制（跳转、重播、停止、强制刷新）
     LaunchedEffect(controller?.commandTrigger, videoEntity) {
         val ctrl = controller ?: return@LaunchedEffect
         val entity = videoEntity ?: return@LaunchedEffect
+        redrawTrigger++
         val targetFrame = ctrl.seekFrameTarget
         val nominalFps = (if (entity.fps > 0) entity.fps else 30).coerceAtMost(maxFps).coerceAtLeast(1)
         val nominalFrameDurationNanos = 1_000_000_000L / nominalFps
@@ -425,6 +427,7 @@ fun SvgaAnimation(
 
         if (videoEntity != null) {
             Canvas(modifier = Modifier.fillMaxSize()) {
+                val trigger = redrawTrigger
                 val drawerObj = drawer ?: return@Canvas
                 if (drawFrameIndex >= 0 && size.width > 0f && size.height > 0f) {
                     clipRect {

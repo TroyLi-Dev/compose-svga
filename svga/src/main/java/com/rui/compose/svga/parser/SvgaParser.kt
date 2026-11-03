@@ -365,7 +365,16 @@ class SvgaParser(
                             DecodeReason.INVALID_PROTOBUF,
                             "Inflate failed"
                         )
-                        val movieEntity = MovieEntity.ADAPTER.decode(inflatedBytes)
+                        val movieEntity = try {
+                            MovieEntity.ADAPTER.decode(inflatedBytes)
+                        } catch (e: Exception) {
+                            throw SvgaException.DecodeException(
+                                url.toString(),
+                                DecodeReason.INVALID_PROTOBUF,
+                                "Protobuf decode failed: ${e.message}",
+                                e
+                            )
+                        }
                         SvgaVideoEntity(movieEntity, cacheDir, frameWidth, frameHeight, needCutBitmap)
                     }
                 }
@@ -467,7 +476,16 @@ class SvgaParser(
                         }, playCallback)
                     } else {
                         inflate(bytes)?.let { inflatedBytes ->
-                            val movieEntity = MovieEntity.ADAPTER.decode(inflatedBytes)
+                            val movieEntity = try {
+                                MovieEntity.ADAPTER.decode(inflatedBytes)
+                            } catch (e: Exception) {
+                                throw SvgaException.DecodeException(
+                                    alias,
+                                    DecodeReason.INVALID_PROTOBUF,
+                                    "Protobuf decode failed: ${e.message}",
+                                    e
+                                )
+                            }
                             val entity = SvgaVideoEntity(
                                 movieEntity,
                                 cacheDir,
@@ -510,11 +528,30 @@ class SvgaParser(
         val specFile = File(cacheDir, "movie.spec")
         val entity = when {
             binaryFile.exists() -> {
-                val movieEntity = MovieEntity.ADAPTER.decode(binaryFile.readBytes())
+                val movieEntity = try {
+                    MovieEntity.ADAPTER.decode(binaryFile.readBytes())
+                } catch (e: Exception) {
+                    throw SvgaException.DecodeException(
+                        cacheDir.name,
+                        DecodeReason.INVALID_PROTOBUF,
+                        "Corrupted movie.binary in $cacheDir: ${e.message}",
+                        e
+                    )
+                }
                 SvgaVideoEntity(movieEntity, cacheDir, frameWidth, frameHeight, needCutBitmap)
             }
             specFile.exists() -> {
-                SvgaVideoEntity(JSONObject(specFile.readText()), cacheDir, frameWidth, frameHeight, needCutBitmap)
+                val json = try {
+                    JSONObject(specFile.readText())
+                } catch (e: Exception) {
+                    throw SvgaException.DecodeException(
+                        cacheDir.name,
+                        DecodeReason.MISSING_SPEC,
+                        "Corrupted movie.spec in $cacheDir: ${e.message}",
+                        e
+                    )
+                }
+                SvgaVideoEntity(json, cacheDir, frameWidth, frameHeight, needCutBitmap)
             }
             else -> throw SvgaException.DecodeException(cacheDir.name, DecodeReason.MISSING_SPEC, "Metadata not found in $cacheDir")
         }
@@ -631,7 +668,7 @@ class SvgaParser(
             if (totalBytes > MAX_STREAM_BYTES) {
                 throw SvgaException.DecodeException(
                     "stream",
-                    DecodeReason.EMPTY_STREAM,
+                    DecodeReason.STREAM_OVERFLOW,
                     "SVGA stream exceeded maximum allowed size ($MAX_STREAM_BYTES bytes)"
                 )
             }

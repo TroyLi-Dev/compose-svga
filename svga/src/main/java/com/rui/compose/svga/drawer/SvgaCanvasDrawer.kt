@@ -170,7 +170,7 @@ class SvgaCanvasDrawer(
             }
             if (shouldStart) {
                 val currentVol = if (this.videoItem.volume.isFinite()) this.videoItem.volume.coerceIn(0f, 1f) else 0f
-                if (currentVol > 0f) {
+                if (currentVol >= 0f) {
                     audio.soundID?.let { soundID ->
                         audio.playID?.let { oldId ->
                             try {
@@ -234,16 +234,27 @@ class SvgaCanvasDrawer(
 
     private fun drawImage(sprite: SvgaDrawerSprite, canvas: Canvas) {
         val imageKey = sprite.imageKey ?: return
-        if (dynamicItem.dynamicHidden[imageKey] == true) return
+        val noExtKey = if (imageKey.length > 4 && imageKey.endsWith(".png", ignoreCase = true)) {
+            imageKey.substring(0, imageKey.length - 4)
+        } else null
+        if (dynamicItem.dynamicHidden[imageKey] == true || (noExtKey != null && dynamicItem.dynamicHidden[noExtKey] == true)) return
 
         val bitmapKey = if (imageKey.endsWith(".matte")) {
             imageKey.substring(0, imageKey.length - 6)
         } else {
             imageKey
         }
+        val noExtBitmapKey = if (bitmapKey.length > 4 && bitmapKey.endsWith(".png", ignoreCase = true)) {
+            bitmapKey.substring(0, bitmapKey.length - 4)
+        } else null
+
         val drawingBitmap = dynamicItem.dynamicImage[bitmapKey]
+            ?: (if (noExtBitmapKey != null) dynamicItem.dynamicImage[noExtBitmapKey] else null)
+            ?: (if (noExtKey != null) dynamicItem.dynamicImage[noExtKey] else null)
             ?: dynamicItem.dynamicImage[imageKey]
             ?: videoItem.imageMap[bitmapKey]
+            ?: (if (noExtBitmapKey != null) videoItem.imageMap[noExtBitmapKey] else null)
+            ?: (if (noExtKey != null) videoItem.imageMap[noExtKey] else null)
             ?: videoItem.imageMap[imageKey]
             ?: return
         if (drawingBitmap.isRecycled || drawingBitmap.width <= 0 || drawingBitmap.height <= 0) return
@@ -275,7 +286,9 @@ class SvgaCanvasDrawer(
                 canvas.drawBitmap(drawingBitmap, frameMatrix, paint)
             }
 
-            dynamicItem.dynamicClickArea[imageKey]?.let { listener ->
+            val clickListener = dynamicItem.dynamicClickArea[imageKey]
+                ?: (if (noExtKey != null) dynamicItem.dynamicClickArea[noExtKey] else null)
+            clickListener?.let { listener ->
                 val rect = this.sharedValues.sharedRectF()
                 rect.set(0f, 0f, drawingBitmap.width.toFloat(), drawingBitmap.height.toFloat())
                 frameMatrix.mapRect(rect)
@@ -309,53 +322,61 @@ class SvgaCanvasDrawer(
             dynamicItem.isTextDirty = false
         }
         val imageKey = sprite.imageKey ?: return
+        val noExtKey = if (imageKey.length > 4 && imageKey.endsWith(".png", ignoreCase = true)) {
+            imageKey.substring(0, imageKey.length - 4)
+        } else null
         var textBitmap: Bitmap? = null
 
-        dynamicItem.dynamicText[imageKey]?.let { drawingText ->
-            dynamicItem.dynamicTextPaint[imageKey]?.let { drawingTextPaint ->
-                val cached = drawTextCache[imageKey]
-                if (cached != null && !cached.bitmap.isRecycled &&
-                    cached.text == drawingText &&
-                    cached.width == drawingBitmap.width &&
-                    cached.height == drawingBitmap.height
-                ) {
-                    textBitmap = cached.bitmap
-                } else {
-                    cached?.bitmap?.let { if (!it.isRecycled) it.recycle() }
-                    try {
-                        val tb = Bitmap.createBitmap(
-                            drawingBitmap.width,
-                            drawingBitmap.height,
-                            Bitmap.Config.ARGB_8888
-                        )
-                        val textCanvas = Canvas(tb)
-                        drawingTextPaint.isAntiAlias = true
-                        val fontMetrics = this.sharedValues.sharedFontMetrics
-                        drawingTextPaint.getFontMetrics(fontMetrics)
-                        val baseLineY =
-                            (drawingBitmap.height / 2f) - (fontMetrics.top + fontMetrics.bottom) / 2f
-                        val x = when (drawingTextPaint.textAlign) {
-                            Paint.Align.CENTER -> drawingBitmap.width / 2f
-                            Paint.Align.RIGHT -> drawingBitmap.width.toFloat()
-                            else -> (drawingBitmap.width - drawingTextPaint.measureText(drawingText)) / 2f
-                        }
-                        textCanvas.drawText(
-                            drawingText,
-                            x,
-                            baseLineY,
-                            drawingTextPaint
-                        )
-                        drawTextCache[imageKey] = TextCacheEntry(drawingText, drawingBitmap.width, drawingBitmap.height, tb)
-                        textBitmap = tb
-                    } catch (t: Throwable) {
-                        com.rui.compose.svga.utils.log.LogUtils.error("SvgaCanvasDrawer", "Failed to create dynamicText bitmap", t)
-                        textBitmap = null
+        val drawingText = dynamicItem.dynamicText[imageKey]
+            ?: (if (noExtKey != null) dynamicItem.dynamicText[noExtKey] else null)
+        val drawingTextPaint = dynamicItem.dynamicTextPaint[imageKey]
+            ?: (if (noExtKey != null) dynamicItem.dynamicTextPaint[noExtKey] else null)
+
+        if (drawingText != null && drawingTextPaint != null) {
+            val cached = drawTextCache[imageKey]
+            if (cached != null && !cached.bitmap.isRecycled &&
+                cached.text == drawingText &&
+                cached.width == drawingBitmap.width &&
+                cached.height == drawingBitmap.height
+            ) {
+                textBitmap = cached.bitmap
+            } else {
+                cached?.bitmap?.let { if (!it.isRecycled) it.recycle() }
+                try {
+                    val tb = Bitmap.createBitmap(
+                        drawingBitmap.width,
+                        drawingBitmap.height,
+                        Bitmap.Config.ARGB_8888
+                    )
+                    val textCanvas = Canvas(tb)
+                    drawingTextPaint.isAntiAlias = true
+                    val fontMetrics = this.sharedValues.sharedFontMetrics
+                    drawingTextPaint.getFontMetrics(fontMetrics)
+                    val baseLineY =
+                        (drawingBitmap.height / 2f) - (fontMetrics.top + fontMetrics.bottom) / 2f
+                    val x = when (drawingTextPaint.textAlign) {
+                        Paint.Align.CENTER -> drawingBitmap.width / 2f
+                        Paint.Align.RIGHT -> drawingBitmap.width.toFloat()
+                        else -> (drawingBitmap.width - drawingTextPaint.measureText(drawingText)) / 2f
                     }
+                    textCanvas.drawText(
+                        drawingText,
+                        x,
+                        baseLineY,
+                        drawingTextPaint
+                    )
+                    drawTextCache[imageKey] = TextCacheEntry(drawingText, drawingBitmap.width, drawingBitmap.height, tb)
+                    textBitmap = tb
+                } catch (t: Throwable) {
+                    com.rui.compose.svga.utils.log.LogUtils.error("SvgaCanvasDrawer", "Failed to create dynamicText bitmap", t)
+                    textBitmap = null
                 }
             }
         }
 
-        dynamicItem.dynamicBoringLayoutText[imageKey]?.let {
+        val boringLayout = dynamicItem.dynamicBoringLayoutText[imageKey]
+            ?: (if (noExtKey != null) dynamicItem.dynamicBoringLayoutText[noExtKey] else null)
+        boringLayout?.let {
             val cached = drawTextCache[imageKey]
             if (cached != null && !cached.bitmap.isRecycled &&
                 cached.text == it.text &&
@@ -384,7 +405,9 @@ class SvgaCanvasDrawer(
             }
         }
 
-        dynamicItem.dynamicStaticLayoutText[imageKey]?.let {
+        val staticLayout = dynamicItem.dynamicStaticLayoutText[imageKey]
+            ?: (if (noExtKey != null) dynamicItem.dynamicStaticLayoutText[noExtKey] else null)
+        staticLayout?.let {
             val cached = drawTextCache[imageKey]
             if (cached != null && !cached.bitmap.isRecycled &&
                 cached.text == it.text &&
@@ -567,8 +590,13 @@ class SvgaCanvasDrawer(
 
     private fun drawDynamic(sprite: SvgaDrawerSprite, canvas: Canvas, frameIndex: Int) {
         val imageKey = sprite.imageKey ?: return
+        val noExtKey = if (imageKey.length > 4 && imageKey.endsWith(".png", ignoreCase = true)) {
+            imageKey.substring(0, imageKey.length - 4)
+        } else null
         val drawer1 = dynamicItem.dynamicDrawer[imageKey]
+            ?: (if (noExtKey != null) dynamicItem.dynamicDrawer[noExtKey] else null)
         val drawer2 = dynamicItem.dynamicDrawerSized[imageKey]
+            ?: (if (noExtKey != null) dynamicItem.dynamicDrawerSized[noExtKey] else null)
         if (drawer1 == null && drawer2 == null) return
 
         val frameMatrix = obtainFrameMatrix(sprite.frameEntity.transform)
@@ -602,8 +630,8 @@ class SvgaCanvasDrawer(
                 drawer2.invoke(
                     canvas,
                     frameIndex,
-                    sprite.frameEntity.layout.width.toInt(),
-                    sprite.frameEntity.layout.height.toInt()
+                    sprite.frameEntity.layout.width.toInt().coerceAtLeast(0),
+                    sprite.frameEntity.layout.height.toInt().coerceAtLeast(0)
                 )
             } catch (t: Throwable) {
                 com.rui.compose.svga.utils.log.LogUtils.error("SvgaCanvasDrawer", "Custom dynamicDrawerSized crashed for $imageKey", t)

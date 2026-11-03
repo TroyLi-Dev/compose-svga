@@ -284,4 +284,29 @@ class SvgaRedesignUnitTest {
         assertEquals("User1", dynamic.dynamicText["user_name"])
         assertEquals("Score: 200", dynamic.dynamicText["score_label"])
     }
+
+    @Test
+    fun testSvgPathParsingExtendedCommands() {
+        // 包含标准平滑三次曲线 S/s、平滑二次曲线 T/t、椭圆弧 A/a
+        val svgD = "M 10 10 C 20 20 30 30 40 40 S 60 60 70 70 s 10 10 20 20 Q 30 30 40 40 T 60 60 t 10 10 A 25 25 0 0 1 100 100 a 10 10 45 1 0 -20 -20 Z"
+        val pathEntity = com.rui.compose.svga.entity.SvgaPathEntity(svgD)
+        val path = android.graphics.Path()
+        pathEntity.buildPath(path)
+        assertNotNull(path)
+    }
+
+    @Test
+    fun testSvgaControllerRequestRedraw() {
+        val controller = com.rui.compose.svga.controller.SvgaController()
+        // 验证调用 requestRedraw 与 invalidate 正常执行且状态稳定
+        controller.requestRedraw()
+        controller.invalidate()
+        assertNotNull(controller)
+    }
+
+    @Test
+    fun testDecodeReasonStreamOverflow() {
+        val reason = com.rui.compose.svga.exception.DecodeReason.STREAM_OVERFLOW
+        assertEquals("STREAM_OVERFLOW", reason.name)
+    }
 }

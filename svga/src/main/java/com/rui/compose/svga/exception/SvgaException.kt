@@ -40,6 +40,7 @@ sealed class SvgaException(
 
 enum class DecodeReason {
     EMPTY_STREAM,
+    STREAM_OVERFLOW,
     CORRUPTED_ZIP,
     ZIP_SLIP_SECURITY,
     MISSING_SPEC,

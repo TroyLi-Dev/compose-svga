@@ -154,6 +154,18 @@ class SvgaController(
         val targetFrame = (maxFrame * fraction.coerceIn(0f, 1f)).toInt()
         seekTo(targetFrame)
     }
+
+    /**
+     * 强制触发当前帧画布重绘（常用于暂停状态下动态修改文本或位图后的画面即时刷新）
+     */
+    fun requestRedraw() {
+        commandTrigger++
+    }
+
+    /**
+     * [requestRedraw] 的传统视图风格别名方法
+     */
+    fun invalidate() = requestRedraw()
 }
 
 /**
