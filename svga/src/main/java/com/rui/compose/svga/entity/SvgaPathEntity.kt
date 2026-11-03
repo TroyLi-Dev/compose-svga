@@ -7,13 +7,14 @@ class SvgaPathEntity(originValue: String) {
 
     companion object {
         private const val VALID_METHODS = "MLHVCSQRAZmlhvcsqraz"
+        private val NEGATIVE_SIGN_REGEX = Regex("(?<![eE\\sMLHVCSQRAZmlhvcsqraz])\\-")
     }
 
     private val replacedValue: String = run {
         var str = originValue
         if (str.contains(",")) str = str.replace(",", " ")
         if (str.contains("-")) {
-            str = str.replace(Regex("(?<![eE\\sMLHVCSQRAZmlhvcsqraz])\\-"), " -")
+            str = str.replace(NEGATIVE_SIGN_REGEX, " -")
         }
         str
     }

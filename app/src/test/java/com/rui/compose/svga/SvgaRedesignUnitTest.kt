@@ -212,4 +212,76 @@ class SvgaRedesignUnitTest {
         oldAudio.delete()
         newAudio.delete()
     }
+
+    @Test
+    fun testPathEntityNegativeParsing() {
+        val pathStr = "M0,0 L10-20 C30-40 50-60 70-80 Z"
+        val pathEntity = com.rui.compose.svga.entity.SvgaPathEntity(pathStr)
+        val path = android.graphics.Path()
+        pathEntity.buildPath(path)
+        assertNotNull(pathEntity)
+    }
+
+    @Test
+    fun testVideoShapeEntityPathBuilding() {
+        // 测试椭圆路径构建
+        val ellipseJson = org.json.JSONObject().apply {
+            put("type", "ellipse")
+            put("args", org.json.JSONObject().apply {
+                put("x", 50.0)
+                put("y", 50.0)
+                put("radiusX", 25.0)
+                put("radiusY", 15.0)
+            })
+        }
+        val ellipseShape = com.rui.compose.svga.entity.SvgaVideoShapeEntity(ellipseJson)
+        ellipseShape.buildPath()
+        assertNotNull(ellipseShape.shapePath)
+
+        // 测试圆角矩形路径构建
+        val roundRectJson = org.json.JSONObject().apply {
+            put("type", "rect")
+            put("args", org.json.JSONObject().apply {
+                put("x", 0.0)
+                put("y", 0.0)
+                put("width", 100.0)
+                put("height", 50.0)
+                put("cornerRadius", 8.0)
+            })
+        }
+        val roundRectShape = com.rui.compose.svga.entity.SvgaVideoShapeEntity(roundRectJson)
+        roundRectShape.buildPath()
+        assertNotNull(roundRectShape.shapePath)
+
+        // 测试直角矩形路径构建
+        val rectJson = org.json.JSONObject().apply {
+            put("type", "rect")
+            put("args", org.json.JSONObject().apply {
+                put("x", 0.0)
+                put("y", 0.0)
+                put("width", 100.0)
+                put("height", 50.0)
+                put("cornerRadius", 0.0)
+            })
+        }
+        val rectShape = com.rui.compose.svga.entity.SvgaVideoShapeEntity(rectJson)
+        rectShape.buildPath()
+        assertNotNull(rectShape.shapePath)
+    }
+
+    @Test
+    fun testDynamicEntityTextIsolation() {
+        val dynamic = com.rui.compose.svga.drawer.SvgaDynamicEntity()
+        val textPaint = android.text.TextPaint()
+        dynamic.setDynamicText("User1", textPaint, "user_name")
+        dynamic.setDynamicText("Score: 100", textPaint, "score_label")
+
+        assertEquals("User1", dynamic.dynamicText["user_name"])
+        assertEquals("Score: 100", dynamic.dynamicText["score_label"])
+
+        // 更新单个 key
+        dynamic.setDynamicText("Score: 200", textPaint, "score_label")
+        assertEquals("User1", dynamic.dynamicText["user_name"])
+        assertEquals("Score: 200", dynamic.dynamicText["score_label"])
+    }
 }

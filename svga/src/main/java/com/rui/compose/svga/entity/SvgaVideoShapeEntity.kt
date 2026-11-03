@@ -3,7 +3,6 @@ package com.rui.compose.svga.entity
 import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Path
-import android.graphics.RectF
 import com.rui.compose.svga.proto.ShapeEntity
 import org.json.JSONArray
 import org.json.JSONObject
@@ -218,24 +217,24 @@ class SvgaVideoShapeEntity {
 
     private fun parseTransform(obj: JSONObject) {
         obj.optJSONObject("transform")?.let {
-            val transform = Matrix()
-            val arr = FloatArray(9)
-            val a = it.optDouble("a", 1.0)
-            val b = it.optDouble("b", 0.0)
-            val c = it.optDouble("c", 0.0)
-            val d = it.optDouble("d", 1.0)
-            val tx = it.optDouble("tx", 0.0)
-            val ty = it.optDouble("ty", 0.0)
-            arr[0] = a.toFloat()
-            arr[1] = c.toFloat()
-            arr[2] = tx.toFloat()
-            arr[3] = b.toFloat()
-            arr[4] = d.toFloat()
-            arr[5] = ty.toFloat()
-            arr[6] = 0.0f
-            arr[7] = 0.0f
-            arr[8] = 1.0f
-            if (arr.all { v -> v.isFinite() }) {
+            val a = it.optDouble("a", 1.0).toFloat()
+            val b = it.optDouble("b", 0.0).toFloat()
+            val c = it.optDouble("c", 0.0).toFloat()
+            val d = it.optDouble("d", 1.0).toFloat()
+            val tx = it.optDouble("tx", 0.0).toFloat()
+            val ty = it.optDouble("ty", 0.0).toFloat()
+            if (a.isFinite() && b.isFinite() && c.isFinite() && d.isFinite() && tx.isFinite() && ty.isFinite()) {
+                val transform = Matrix()
+                val arr = FloatArray(9)
+                arr[0] = a
+                arr[1] = c
+                arr[2] = tx
+                arr[3] = b
+                arr[4] = d
+                arr[5] = ty
+                arr[6] = 0.0f
+                arr[7] = 0.0f
+                arr[8] = 1.0f
                 transform.setValues(arr)
                 this.transform = transform
             }
@@ -244,18 +243,18 @@ class SvgaVideoShapeEntity {
 
     private fun parseTransform(obj: ShapeEntity) {
         obj.transform?.let {
-            val transform = Matrix()
-            val arr = FloatArray(9)
-            arr[0] = it.a
-            arr[1] = it.c
-            arr[2] = it.tx
-            arr[3] = it.b
-            arr[4] = it.d
-            arr[5] = it.ty
-            arr[6] = 0.0f
-            arr[7] = 0.0f
-            arr[8] = 1.0f
-            if (arr.all { v -> v.isFinite() }) {
+            if (it.a.isFinite() && it.b.isFinite() && it.c.isFinite() && it.d.isFinite() && it.tx.isFinite() && it.ty.isFinite()) {
+                val transform = Matrix()
+                val arr = FloatArray(9)
+                arr[0] = it.a
+                arr[1] = it.c
+                arr[2] = it.tx
+                arr[3] = it.b
+                arr[4] = it.d
+                arr[5] = it.ty
+                arr[6] = 0.0f
+                arr[7] = 0.0f
+                arr[8] = 1.0f
                 transform.setValues(arr)
                 this.transform = transform
             }
@@ -279,7 +278,7 @@ class SvgaVideoShapeEntity {
                     val rx = (this.args?.get("radiusX") as? Number)?.toFloat() ?: return
                     val ry = (this.args?.get("radiusY") as? Number)?.toFloat() ?: return
                     if (rx <= 0f || ry <= 0f || !x.isFinite() || !y.isFinite() || !rx.isFinite() || !ry.isFinite()) return
-                    localPath.addOval(RectF(x - rx, y - ry, x + rx, y + ry), Path.Direction.CW)
+                    localPath.addOval(x - rx, y - ry, x + rx, y + ry, Path.Direction.CW)
                 }
                 Type.rect -> {
                     val x = (this.args?.get("x") as? Number)?.toFloat() ?: 0f
@@ -290,14 +289,20 @@ class SvgaVideoShapeEntity {
                     if (width <= 0f || height <= 0f || !x.isFinite() || !y.isFinite() || !width.isFinite() || !height.isFinite()) return
                     if (cornerRadius > 0f) {
                         localPath.addRoundRect(
-                            RectF(x, y, x + width, y + height),
+                            x,
+                            y,
+                            x + width,
+                            y + height,
                             cornerRadius,
                             cornerRadius,
                             Path.Direction.CW
                         )
                     } else {
                         localPath.addRect(
-                            RectF(x, y, x + width, y + height),
+                            x,
+                            y,
+                            x + width,
+                            y + height,
                             Path.Direction.CW
                         )
                     }

@@ -28,8 +28,15 @@ class SvgaCanvasDrawer(
     val dynamicItem: SvgaDynamicEntity
 ) : SvgaBaseDrawer(videoItem) {
 
+    private class TextCacheEntry(
+        val text: CharSequence,
+        val width: Int,
+        val height: Int,
+        val bitmap: Bitmap
+    )
+
     private val sharedValues = ShareValues()
-    private val drawTextCache: HashMap<String, Bitmap> = hashMapOf()
+    private val drawTextCache: HashMap<String, TextCacheEntry> = hashMapOf()
 
     val matteSprites = mutableMapOf<String, SvgaDrawerSprite>()
     private val matrixScaleTempValues = FloatArray(9)
@@ -197,7 +204,7 @@ class SvgaCanvasDrawer(
     }
 
     fun clear() {
-        drawTextCache.values.forEach { if (!it.isRecycled) it.recycle() }
+        drawTextCache.values.forEach { if (!it.bitmap.isRecycled) it.bitmap.recycle() }
         drawTextCache.clear()
         sharedValues.release()
         videoItem.audioList.forEach { audio ->
@@ -296,7 +303,7 @@ class SvgaCanvasDrawer(
     ) {
         if (drawingBitmap.width <= 0 || drawingBitmap.height <= 0) return
         if (dynamicItem.isTextDirty) {
-            this.drawTextCache.values.forEach { if (!it.isRecycled) it.recycle() }
+            this.drawTextCache.values.forEach { if (!it.bitmap.isRecycled) it.bitmap.recycle() }
             this.drawTextCache.clear()
             dynamicItem.isTextDirty = false
         }
@@ -306,9 +313,14 @@ class SvgaCanvasDrawer(
         dynamicItem.dynamicText[imageKey]?.let { drawingText ->
             dynamicItem.dynamicTextPaint[imageKey]?.let { drawingTextPaint ->
                 val cached = drawTextCache[imageKey]
-                if (cached != null && !cached.isRecycled) {
-                    textBitmap = cached
+                if (cached != null && !cached.bitmap.isRecycled &&
+                    cached.text == drawingText &&
+                    cached.width == drawingBitmap.width &&
+                    cached.height == drawingBitmap.height
+                ) {
+                    textBitmap = cached.bitmap
                 } else {
+                    cached?.bitmap?.let { if (!it.isRecycled) it.recycle() }
                     try {
                         val tb = Bitmap.createBitmap(
                             drawingBitmap.width,
@@ -321,13 +333,18 @@ class SvgaCanvasDrawer(
                         drawingTextPaint.getFontMetrics(fontMetrics)
                         val baseLineY =
                             (drawingBitmap.height / 2f) - (fontMetrics.top + fontMetrics.bottom) / 2f
+                        val x = when (drawingTextPaint.textAlign) {
+                            Paint.Align.CENTER -> drawingBitmap.width / 2f
+                            Paint.Align.RIGHT -> drawingBitmap.width.toFloat()
+                            else -> (drawingBitmap.width - drawingTextPaint.measureText(drawingText)) / 2f
+                        }
                         textCanvas.drawText(
                             drawingText,
-                            drawingBitmap.width / 2f,
+                            x,
                             baseLineY,
                             drawingTextPaint
                         )
-                        drawTextCache[imageKey] = tb
+                        drawTextCache[imageKey] = TextCacheEntry(drawingText, drawingBitmap.width, drawingBitmap.height, tb)
                         textBitmap = tb
                     } catch (t: Throwable) {
                         com.rui.compose.svga.utils.log.LogUtils.error("SvgaCanvasDrawer", "Failed to create dynamicText bitmap", t)
@@ -339,9 +356,14 @@ class SvgaCanvasDrawer(
 
         dynamicItem.dynamicBoringLayoutText[imageKey]?.let {
             val cached = drawTextCache[imageKey]
-            if (cached != null && !cached.isRecycled) {
-                textBitmap = cached
+            if (cached != null && !cached.bitmap.isRecycled &&
+                cached.text == it.text &&
+                cached.width == drawingBitmap.width &&
+                cached.height == drawingBitmap.height
+            ) {
+                textBitmap = cached.bitmap
             } else {
+                cached?.bitmap?.let { old -> if (!old.isRecycled) old.recycle() }
                 try {
                     it.paint.isAntiAlias = true
                     val tb = Bitmap.createBitmap(
@@ -352,7 +374,7 @@ class SvgaCanvasDrawer(
                     val textCanvas = Canvas(tb)
                     textCanvas.translate(0f, ((drawingBitmap.height - it.height) / 2).toFloat())
                     it.draw(textCanvas)
-                    drawTextCache[imageKey] = tb
+                    drawTextCache[imageKey] = TextCacheEntry(it.text, drawingBitmap.width, drawingBitmap.height, tb)
                     textBitmap = tb
                 } catch (t: Throwable) {
                     com.rui.compose.svga.utils.log.LogUtils.error("SvgaCanvasDrawer", "Failed to create dynamicBoringLayoutText bitmap", t)
@@ -363,9 +385,14 @@ class SvgaCanvasDrawer(
 
         dynamicItem.dynamicStaticLayoutText[imageKey]?.let {
             val cached = drawTextCache[imageKey]
-            if (cached != null && !cached.isRecycled) {
-                textBitmap = cached
+            if (cached != null && !cached.bitmap.isRecycled &&
+                cached.text == it.text &&
+                cached.width == drawingBitmap.width &&
+                cached.height == drawingBitmap.height
+            ) {
+                textBitmap = cached.bitmap
             } else {
+                cached?.bitmap?.let { old -> if (!old.isRecycled) old.recycle() }
                 it.paint.isAntiAlias = true
                 val layout = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                     val lineMax = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
@@ -414,7 +441,7 @@ class SvgaCanvasDrawer(
                     val textCanvas = Canvas(tb)
                     textCanvas.translate(0f, ((drawingBitmap.height - layout.height) / 2).toFloat())
                     layout.draw(textCanvas)
-                    drawTextCache[imageKey] = tb
+                    drawTextCache[imageKey] = TextCacheEntry(it.text, drawingBitmap.width, drawingBitmap.height, tb)
                     textBitmap = tb
                 } catch (t: Throwable) {
                     com.rui.compose.svga.utils.log.LogUtils.error("SvgaCanvasDrawer", "Failed to create text bitmap", t)

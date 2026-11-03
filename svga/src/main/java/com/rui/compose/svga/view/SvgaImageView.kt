@@ -302,10 +302,12 @@ open class SvgaImageView @JvmOverloads constructor(
     }
 
     private var wasAnimatingBeforeHide = false
+    private var wasAnimatingBeforeDetach = false
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
-        if (autoPlay && getSvgaDrawable() != null && !isAnimating) {
+        if ((autoPlay || wasAnimatingBeforeDetach) && getSvgaDrawable() != null && !isAnimating) {
+            wasAnimatingBeforeDetach = false
             startAnimation()
         }
     }
@@ -360,6 +362,7 @@ open class SvgaImageView @JvmOverloads constructor(
         super.onDetachedFromWindow()
         currentParseCancelTask?.invoke()
         currentParseCancelTask = null
+        wasAnimatingBeforeDetach = isAnimating
         stopAnimation(clearsAfterDetached)
         if (clearsAfterDetached) {
             clear()

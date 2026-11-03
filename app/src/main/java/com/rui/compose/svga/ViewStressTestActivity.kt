@@ -278,6 +278,11 @@ class ViewStressTestActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        fpsCallback?.let {
+            try {
+                android.view.Choreographer.getInstance().removeFrameCallback(it)
+            } catch (_: Throwable) {}
+        }
         fpsCallback = null
         isInterferenceEnabled = false
         interferencePool.clear()

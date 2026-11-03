@@ -32,17 +32,23 @@ class SvgaVideoSpriteFrameEntity {
             )
         }
         obj.optJSONObject("transform")?.let {
-            val arr = FloatArray(9)
-            arr[0] = it.optDouble("a", 1.0).toFloat()
-            arr[1] = it.optDouble("c", 0.0).toFloat()
-            arr[2] = it.optDouble("tx", 0.0).toFloat()
-            arr[3] = it.optDouble("b", 0.0).toFloat()
-            arr[4] = it.optDouble("d", 1.0).toFloat()
-            arr[5] = it.optDouble("ty", 0.0).toFloat()
-            arr[6] = 0.0f
-            arr[7] = 0.0f
-            arr[8] = 1.0f
-            if (arr.all { v -> v.isFinite() }) {
+            val a = it.optDouble("a", 1.0).toFloat()
+            val c = it.optDouble("c", 0.0).toFloat()
+            val tx = it.optDouble("tx", 0.0).toFloat()
+            val b = it.optDouble("b", 0.0).toFloat()
+            val d = it.optDouble("d", 1.0).toFloat()
+            val ty = it.optDouble("ty", 0.0).toFloat()
+            if (a.isFinite() && b.isFinite() && c.isFinite() && d.isFinite() && tx.isFinite() && ty.isFinite()) {
+                val arr = FloatArray(9)
+                arr[0] = a
+                arr[1] = c
+                arr[2] = tx
+                arr[3] = b
+                arr[4] = d
+                arr[5] = ty
+                arr[6] = 0.0f
+                arr[7] = 0.0f
+                arr[8] = 1.0f
                 this.transform.setValues(arr)
             } else {
                 this.transform.reset()
@@ -75,17 +81,17 @@ class SvgaVideoSpriteFrameEntity {
             )
         }
         obj.transform?.let {
-            val arr = FloatArray(9)
-            arr[0] = it.a
-            arr[1] = it.c
-            arr[2] = it.tx
-            arr[3] = it.b
-            arr[4] = it.d
-            arr[5] = it.ty
-            arr[6] = 0.0f
-            arr[7] = 0.0f
-            arr[8] = 1.0f
-            if (arr.all { v -> v.isFinite() }) {
+            if (it.a.isFinite() && it.b.isFinite() && it.c.isFinite() && it.d.isFinite() && it.tx.isFinite() && it.ty.isFinite()) {
+                val arr = FloatArray(9)
+                arr[0] = it.a
+                arr[1] = it.c
+                arr[2] = it.tx
+                arr[3] = it.b
+                arr[4] = it.d
+                arr[5] = it.ty
+                arr[6] = 0.0f
+                arr[7] = 0.0f
+                arr[8] = 1.0f
                 this.transform.setValues(arr)
             } else {
                 this.transform.reset()
