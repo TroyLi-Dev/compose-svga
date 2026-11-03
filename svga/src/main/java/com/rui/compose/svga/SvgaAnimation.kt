@@ -101,6 +101,7 @@ fun SvgaAnimation(
     failure: @Composable (() -> Unit)? = null
 ) {
     if (model == null) {
+        controller?.loadState = SvgaLoadState.Idle
         Box(modifier = modifier)
         return
     }
@@ -162,7 +163,9 @@ fun SvgaAnimation(
             if (loadState == SvgaLoadState.Success) {
                 controller?.videoEntity = videoEntity
                 controller?.loadState = SvgaLoadState.Success
-                controller?.playState = SvgaPlayState.Playing
+                if (controller?.playState != SvgaPlayState.Paused && controller?.playState != SvgaPlayState.Idle) {
+                    controller?.playState = SvgaPlayState.Playing
+                }
                 currentOnSuccess(videoEntity!!)
                 currentOnPlay()
             }
@@ -191,7 +194,9 @@ fun SvgaAnimation(
             loadState = SvgaLoadState.Success
             controller?.videoEntity = entity
             controller?.loadState = SvgaLoadState.Success
-            controller?.playState = SvgaPlayState.Playing
+            if (controller?.playState != SvgaPlayState.Paused && controller?.playState != SvgaPlayState.Idle) {
+                controller?.playState = SvgaPlayState.Playing
+            }
             currentOnSuccess(entity)
             currentOnPlay()
         } catch (e: Exception) {
@@ -235,11 +240,25 @@ fun SvgaAnimation(
     }
 
     LaunchedEffect(videoEntity, isMute) {
-        videoEntity?.volume = if (isMute) 0.0f else 1.0f
+        val entity = videoEntity ?: return@LaunchedEffect
+        val vol = if (isMute) 0.0f else 1.0f
+        entity.volume = vol
+        if (SvgaSoundManager.isInit()) {
+            SvgaSoundManager.setVolume(vol, entity)
+        } else {
+            entity.audioList.forEach { audio ->
+                audio.playID?.let { id ->
+                    try { entity.soundPool?.setVolume(id, vol, vol) } catch (_: Throwable) {}
+                }
+            }
+        }
     }
 
     val drawer = remember(videoEntity, dynamicEntity) {
         videoEntity?.let { SvgaCanvasDrawer(it, dynamicEntity ?: SvgaDynamicEntity()) }
+    }
+    DisposableEffect(drawer) {
+        onDispose { drawer?.clear() }
     }
     val nativeScaleType = remember(contentScale) {
         when (contentScale) {
@@ -263,7 +282,7 @@ fun SvgaAnimation(
     var isFinished by remember(cacheKey) { mutableStateOf(false) }
 
     // 响应 Controller 命令控制（跳转、重播、停止）
-    LaunchedEffect(controller?.commandTrigger) {
+    LaunchedEffect(controller?.commandTrigger, videoEntity) {
         val ctrl = controller ?: return@LaunchedEffect
         val entity = videoEntity ?: return@LaunchedEffect
         val targetFrame = ctrl.seekFrameTarget
@@ -274,6 +293,7 @@ fun SvgaAnimation(
             val clampedFrame = targetFrame.coerceIn(0, (entity.frames - 1).coerceAtLeast(0))
             accumulatedTimeNanos = clampedFrame.toLong() * nominalFrameDurationNanos
             drawFrameIndex = clampedFrame
+            lastFrameRef.value = -2
             ctrl.currentFrame = clampedFrame
             ctrl.seekFrameTarget = null
             lastTickTimeNanos = 0L
@@ -283,20 +303,24 @@ fun SvgaAnimation(
         } else if (ctrl.isPlaying && isFinished) {
             accumulatedTimeNanos = 0L
             drawFrameIndex = 0
+            lastFrameRef.value = -2
             ctrl.currentFrame = 0
             isFinished = false
             lastTickTimeNanos = 0L
         } else if (ctrl.playState == SvgaPlayState.Idle) {
             accumulatedTimeNanos = 0L
             drawFrameIndex = 0
+            lastFrameRef.value = -2
             ctrl.currentFrame = 0
         }
     }
 
     LaunchedEffect(isStop, loops) {
-        if (!isStop && isFinished && loops == 0) {
+        if (!isStop && isFinished) {
             isFinished = false
             accumulatedTimeNanos = 0L
+            drawFrameIndex = 0
+            lastFrameRef.value = -2
         }
     }
 
@@ -361,7 +385,7 @@ fun SvgaAnimation(
                     lastFrameRef.value = currentFrame
                     drawFrameIndex = currentFrame
                     controller?.currentFrame = currentFrame
-                    currentOnStep(currentFrame, currentFrame.toDouble() / numFrames)
+                    currentOnStep(currentFrame, ((currentFrame + 1).toDouble() / numFrames).coerceIn(0.0, 1.0))
                 }
             }
         }
@@ -381,7 +405,7 @@ fun SvgaAnimation(
         if (videoEntity != null) {
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val drawerObj = drawer ?: return@Canvas
-                if (drawFrameIndex >= 0) {
+                if (drawFrameIndex >= 0 && size.width > 0f && size.height > 0f) {
                     clipRect {
                         drawIntoCanvas { canvas ->
                             val nativeCanvas = canvas.nativeCanvas

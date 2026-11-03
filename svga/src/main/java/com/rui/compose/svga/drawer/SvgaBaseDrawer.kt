@@ -5,7 +5,7 @@ import android.graphics.Rect
 import android.widget.ImageView
 import com.rui.compose.svga.entity.SvgaVideoEntity
 import com.rui.compose.svga.entity.SvgaVideoSpriteFrameEntity
-import com.rui.compose.svga.utils.Pools
+import androidx.core.util.Pools
 import kotlin.math.max
 
 abstract class SvgaBaseDrawer(val videoItem: SvgaVideoEntity) {
@@ -76,8 +76,8 @@ abstract class SvgaBaseDrawer(val videoItem: SvgaVideoEntity) {
         val drawHeight: Float
 
         if (overrideWidth != null && overrideHeight != null) {
-            drawWidth = overrideWidth
-            drawHeight = overrideHeight
+            drawWidth = kotlin.math.max(1f, overrideWidth)
+            drawHeight = kotlin.math.max(1f, overrideHeight)
             clipRect.set(0, 0, drawWidth.toInt(), drawHeight.toInt())
             canvas.clipRect(clipRect)
         } else {

@@ -2,6 +2,7 @@ package com.rui.compose.svga.decode
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import com.rui.compose.svga.utils.log.LogUtils
 
 abstract class SvgaBitmapDecoder<T> {
 
@@ -11,26 +12,25 @@ abstract class SvgaBitmapDecoder<T> {
         reqHeight: Int,
         needCutBitmap: Boolean = false
     ): Bitmap? {
-        return BitmapFactory.Options().run {
-            if (needCutBitmap) {
-                inJustDecodeBounds = true
-                inPreferredConfig = Bitmap.Config.RGB_565
-                inSampleSize = 2
-                inJustDecodeBounds = false
-                onDecode(data, this)
-            } else {
-                inJustDecodeBounds = (reqWidth > 0 && reqHeight > 0)
-                inPreferredConfig = Bitmap.Config.RGB_565
-
-                val bitmap = onDecode(data, this)
-                if (!inJustDecodeBounds) {
-                    return bitmap
+        return try {
+            BitmapFactory.Options().run {
+                if (reqWidth > 0 && reqHeight > 0) {
+                    inJustDecodeBounds = true
+                    onDecode(data, this)
+                    val calculated = BitmapSampleSizeCalculator.calculate(this, reqWidth, reqHeight)
+                    inSampleSize = if (needCutBitmap) kotlin.math.max(2, calculated) else calculated
+                    inJustDecodeBounds = false
+                    onDecode(data, this)
+                } else if (needCutBitmap) {
+                    inSampleSize = 2
+                    onDecode(data, this)
+                } else {
+                    onDecode(data, this)
                 }
-
-                inSampleSize = BitmapSampleSizeCalculator.calculate(this, reqWidth, reqHeight)
-                inJustDecodeBounds = false
-                onDecode(data, this)
             }
+        } catch (t: Throwable) {
+            LogUtils.error("SvgaBitmapDecoder", "OOM or error during bitmap decode", t)
+            null
         }
     }
 

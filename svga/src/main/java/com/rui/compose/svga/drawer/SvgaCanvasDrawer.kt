@@ -9,6 +9,7 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
+import android.graphics.RectF
 import android.graphics.Shader
 import android.os.Build
 import android.text.StaticLayout
@@ -45,32 +46,31 @@ class SvgaCanvasDrawer(
         val sprites = requestFrameSprites(frameIndex)
         if (sprites.isEmpty()) return
 
+        var saveID = -1
         try {
             matteSprites.clear()
-            var saveID = -1
-
-            val drawWidth = (overrideWidth ?: canvas.width.toFloat()).coerceIn(1f, 2048f)
-            val drawHeight = (overrideHeight ?: canvas.height.toFloat()).coerceIn(1f, 2048f)
-
-            var hasMatteLayer = false
-            sprites.getOrNull(0)?.imageKey?.let {
-                if (it.endsWith(".matte")) {
-                    hasMatteLayer = true
+            for (i in 0 until sprites.size) {
+                val s = sprites[i]
+                val key = s.imageKey
+                if (key != null && key.endsWith(".matte")) {
+                    matteSprites[key] = s
                 }
             }
 
+            val drawWidth = (overrideWidth ?: canvas.width.toFloat()).coerceIn(1f, 4096f)
+            val drawHeight = (overrideHeight ?: canvas.height.toFloat()).coerceIn(1f, 4096f)
+
             sprites.forEachIndexed { index, svgaDrawerSprite ->
                 svgaDrawerSprite.imageKey?.let {
-                    if (!hasMatteLayer || Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
-                        drawSprite(svgaDrawerSprite, canvas, frameIndex)
-                        return@forEachIndexed
-                    }
                     if (it.endsWith(".matte")) {
-                        matteSprites[it] = svgaDrawerSprite
+                        // 遮罩图层仅用于合成蒙版，不直接绘制到主画布
                         return@forEachIndexed
                     }
                 }
                 if (isMatteBegin(index, sprites)) {
+                    if (saveID != -1) {
+                        try { canvas.restoreToCount(saveID) } catch (_: Throwable) {}
+                    }
                     saveID = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                         canvas.saveLayer(0f, 0f, drawWidth, drawHeight, null)
                     } else {
@@ -80,26 +80,35 @@ class SvgaCanvasDrawer(
                 drawSprite(svgaDrawerSprite, canvas, frameIndex)
 
                 if (isMatteEnd(index, sprites)) {
-                    matteSprites[svgaDrawerSprite.matteKey]?.let {
-                        drawSprite(
-                            it,
-                            this.sharedValues.obtainMatteCanvas(drawWidth.toInt(), drawHeight.toInt()),
-                            frameIndex
-                        )
-                        canvas.drawBitmap(
-                            this.sharedValues.sharedMatteBitmap(),
-                            0f, 0f, this.sharedValues.shareMattePaint()
-                        )
-                        if (saveID != -1) {
-                            canvas.restoreToCount(saveID)
-                        } else {
-                            canvas.restore()
+                    val matteSprite = matteSprites[svgaDrawerSprite.matteKey]
+                    if (matteSprite != null) {
+                        val matteCanvas = this.sharedValues.obtainMatteCanvas(drawWidth.toInt(), drawHeight.toInt())
+                        val matteBitmap = this.sharedValues.sharedMatteBitmap()
+                        if (matteCanvas != null && matteBitmap != null && !matteBitmap.isRecycled) {
+                            drawSprite(matteSprite, matteCanvas, frameIndex)
+                            val srcRect = android.graphics.Rect(0, 0, drawWidth.toInt(), drawHeight.toInt())
+                            val dstRect = this.sharedValues.sharedRectF()
+                            dstRect.set(0f, 0f, drawWidth, drawHeight)
+                            canvas.drawBitmap(
+                                matteBitmap,
+                                srcRect,
+                                dstRect,
+                                this.sharedValues.shareMattePaint()
+                            )
                         }
-                        return@forEachIndexed
                     }
+                    if (saveID != -1) {
+                        try { canvas.restoreToCount(saveID) } catch (_: Throwable) {}
+                        saveID = -1
+                    }
+                    return@forEachIndexed
                 }
             }
         } finally {
+            if (saveID != -1) {
+                try { canvas.restoreToCount(saveID) } catch (_: Throwable) {}
+                saveID = -1
+            }
             releaseFrameSprites(sprites)
         }
     }
@@ -109,8 +118,9 @@ class SvgaCanvasDrawer(
         val imageKey = current.imageKey
         if (imageKey != null && imageKey.endsWith(".matte")) return false
         val matteKey = current.matteKey
-        if (matteKey.isNullOrEmpty() || spriteIndex <= 0) return false
-        val lastSprite = sprites.getOrNull(spriteIndex - 1) ?: return false
+        if (matteKey.isNullOrEmpty()) return false
+        if (spriteIndex == 0) return true
+        val lastSprite = sprites.getOrNull(spriteIndex - 1) ?: return true
         return lastSprite.matteKey.isNullOrEmpty() || lastSprite.matteKey != matteKey
     }
 
@@ -125,33 +135,72 @@ class SvgaCanvasDrawer(
         return nextSprite.matteKey.isNullOrEmpty() || nextSprite.matteKey != matteKey
     }
 
+    private var lastAudioFrame = -1
+
     private fun playAudio(frameIndex: Int) {
         if (this.videoItem.audioList.isEmpty()) return
+        // 动画倒带、循环或重播时，强制停播上一轮遗留的音频流
+        if (frameIndex < lastAudioFrame) {
+            this.videoItem.audioList.forEach { audio ->
+                audio.playID?.let {
+                    try {
+                        if (SvgaSoundManager.isInit()) SvgaSoundManager.stop(it)
+                        else this.videoItem.soundPool?.stop(it)
+                    } catch (_: Throwable) {}
+                }
+                audio.playID = null
+            }
+            lastAudioFrame = -1
+        }
+
+        val previousFrame = lastAudioFrame
+        lastAudioFrame = frameIndex
+
         this.videoItem.audioList.forEach { audio ->
-            if (audio.startFrame == frameIndex) {
-                val currentVol = this.videoItem.volume
+            val shouldStart = if (previousFrame == -1) {
+                audio.startFrame == frameIndex
+            } else {
+                audio.startFrame in (previousFrame + 1)..frameIndex && frameIndex < audio.endFrame
+            }
+            if (shouldStart) {
+                val currentVol = if (this.videoItem.volume.isFinite()) this.videoItem.volume.coerceIn(0f, 1f) else 0f
                 if (currentVol > 0f) {
-                    if (SvgaSoundManager.isInit()) {
-                        audio.soundID?.let { soundID ->
-                            audio.playID = SvgaSoundManager.play(soundID, currentVol)
+                    audio.soundID?.let { soundID ->
+                        audio.playID?.let { oldId ->
+                            try {
+                                if (SvgaSoundManager.isInit()) SvgaSoundManager.stop(oldId)
+                                else this.videoItem.soundPool?.stop(oldId)
+                            } catch (_: Throwable) {}
                         }
-                    } else {
-                        this.videoItem.soundPool?.let { soundPool ->
-                            audio.soundID?.let { soundID ->
-                                audio.playID = soundPool.play(soundID, currentVol, currentVol, 1, 0, 1.0f)
+                        audio.playID = try {
+                            if (SvgaSoundManager.isInit()) {
+                                SvgaSoundManager.play(soundID, currentVol)
+                            } else {
+                                this.videoItem.soundPool?.play(soundID, currentVol, currentVol, 1, 0, 1.0f)
                             }
+                        } catch (t: Throwable) {
+                            com.rui.compose.svga.utils.log.LogUtils.error("SvgaCanvasDrawer", "playAudio failed", t)
+                            null
                         }
                     }
                 }
             }
             if (audio.endFrame <= frameIndex) {
                 audio.playID?.let {
-                    if (SvgaSoundManager.isInit()) SvgaSoundManager.stop(it)
-                    else this.videoItem.soundPool?.stop(it)
+                    try {
+                        if (SvgaSoundManager.isInit()) SvgaSoundManager.stop(it)
+                        else this.videoItem.soundPool?.stop(it)
+                    } catch (_: Throwable) {}
                 }
                 audio.playID = null
             }
         }
+    }
+
+    fun clear() {
+        drawTextCache.values.forEach { if (!it.isRecycled) it.recycle() }
+        drawTextCache.clear()
+        sharedValues.release()
     }
 
     private fun obtainFrameMatrix(transform: Matrix): Matrix {
@@ -177,8 +226,12 @@ class SvgaCanvasDrawer(
         } else {
             imageKey
         }
-        val drawingBitmap =
-            (dynamicItem.dynamicImage[bitmapKey] ?: videoItem.imageMap[bitmapKey]) ?: return
+        val drawingBitmap = dynamicItem.dynamicImage[bitmapKey]
+            ?: dynamicItem.dynamicImage[imageKey]
+            ?: videoItem.imageMap[bitmapKey]
+            ?: videoItem.imageMap[imageKey]
+            ?: return
+        if (drawingBitmap.isRecycled || drawingBitmap.width <= 0 || drawingBitmap.height <= 0) return
 
         val frameMatrix = obtainFrameMatrix(sprite.frameEntity.transform)
         val paint = this.sharedValues.sharedPaint()
@@ -188,33 +241,40 @@ class SvgaCanvasDrawer(
 
         if (sprite.frameEntity.maskPath != null) {
             val maskPath = sprite.frameEntity.maskPath ?: return
-            canvas.save()
-            val path = this.sharedValues.sharedPath()
-            maskPath.buildPath(path)
-            path.transform(frameMatrix)
-            canvas.clipPath(path)
-            frameMatrix.preScale(
-                (sprite.frameEntity.layout.width / drawingBitmap.width).toFloat(),
-                (sprite.frameEntity.layout.height / drawingBitmap.height).toFloat()
-            )
-            if (!drawingBitmap.isRecycled) canvas.drawBitmap(drawingBitmap, frameMatrix, paint)
-            canvas.restore()
+            val count = canvas.save()
+            try {
+                val path = this.sharedValues.sharedPath()
+                maskPath.buildPath(path)
+                path.transform(frameMatrix)
+                canvas.clipPath(path)
+                val sx = (sprite.frameEntity.layout.width / drawingBitmap.width).toFloat()
+                val sy = (sprite.frameEntity.layout.height / drawingBitmap.height).toFloat()
+                if (sx.isFinite() && sy.isFinite() && sx > 0f && sy > 0f) {
+                    frameMatrix.preScale(sx, sy)
+                }
+                if (!drawingBitmap.isRecycled) canvas.drawBitmap(drawingBitmap, frameMatrix, paint)
+            } finally {
+                canvas.restoreToCount(count)
+            }
         } else {
-            frameMatrix.preScale(
-                (sprite.frameEntity.layout.width / drawingBitmap.width).toFloat(),
-                (sprite.frameEntity.layout.height / drawingBitmap.height).toFloat()
-            )
+            val sx = (sprite.frameEntity.layout.width / drawingBitmap.width).toFloat()
+            val sy = (sprite.frameEntity.layout.height / drawingBitmap.height).toFloat()
+            if (sx.isFinite() && sy.isFinite() && sx > 0f && sy > 0f) {
+                frameMatrix.preScale(sx, sy)
+            }
             if (!drawingBitmap.isRecycled) canvas.drawBitmap(drawingBitmap, frameMatrix, paint)
         }
 
         dynamicItem.dynamicClickArea[imageKey]?.let { listener ->
-            frameMatrix.getValues(clickAreaTempValues)
+            val rect = this.sharedValues.sharedRectF()
+            rect.set(0f, 0f, drawingBitmap.width.toFloat(), drawingBitmap.height.toFloat())
+            frameMatrix.mapRect(rect)
             listener.onResponseArea(
                 imageKey,
-                clickAreaTempValues[2].toInt(),
-                clickAreaTempValues[5].toInt(),
-                (drawingBitmap.width * clickAreaTempValues[0] + clickAreaTempValues[2]).toInt(),
-                (drawingBitmap.height * clickAreaTempValues[4] + clickAreaTempValues[5]).toInt()
+                rect.left.toInt(),
+                rect.top.toInt(),
+                rect.right.toInt(),
+                rect.bottom.toInt()
             )
         }
         drawTextOnBitmap(canvas, drawingBitmap, sprite, frameMatrix)
@@ -228,6 +288,7 @@ class SvgaCanvasDrawer(
     ) {
         if (drawingBitmap.width <= 0 || drawingBitmap.height <= 0) return
         if (dynamicItem.isTextDirty) {
+            this.drawTextCache.values.forEach { if (!it.isRecycled) it.recycle() }
             this.drawTextCache.clear()
             dynamicItem.isTextDirty = false
         }
@@ -237,39 +298,51 @@ class SvgaCanvasDrawer(
         dynamicItem.dynamicText[imageKey]?.let { drawingText ->
             dynamicItem.dynamicTextPaint[imageKey]?.let { drawingTextPaint ->
                 drawTextCache[imageKey]?.let { textBitmap = it } ?: run {
-                    textBitmap = Bitmap.createBitmap(
-                        drawingBitmap.width,
-                        drawingBitmap.height,
-                        Bitmap.Config.ARGB_8888
-                    )
-                    val textCanvas = Canvas(textBitmap!!)
-                    drawingTextPaint.isAntiAlias = true
-                    val fontMetrics = drawingTextPaint.fontMetrics
-                    val baseLineY =
-                        (drawingBitmap.height / 2f) - (fontMetrics.top + fontMetrics.bottom) / 2f
-                    textCanvas.drawText(
-                        drawingText,
-                        drawingBitmap.width / 2f,
-                        baseLineY,
-                        drawingTextPaint
-                    )
-                    drawTextCache[imageKey] = textBitmap!!
+                    try {
+                        val tb = Bitmap.createBitmap(
+                            drawingBitmap.width,
+                            drawingBitmap.height,
+                            Bitmap.Config.ARGB_8888
+                        )
+                        val textCanvas = Canvas(tb)
+                        drawingTextPaint.isAntiAlias = true
+                        val fontMetrics = drawingTextPaint.fontMetrics
+                        val baseLineY =
+                            (drawingBitmap.height / 2f) - (fontMetrics.top + fontMetrics.bottom) / 2f
+                        textCanvas.drawText(
+                            drawingText,
+                            drawingBitmap.width / 2f,
+                            baseLineY,
+                            drawingTextPaint
+                        )
+                        drawTextCache[imageKey] = tb
+                        textBitmap = tb
+                    } catch (t: Throwable) {
+                        com.rui.compose.svga.utils.log.LogUtils.error("SvgaCanvasDrawer", "Failed to create dynamicText bitmap", t)
+                        textBitmap = null
+                    }
                 }
             }
         }
 
         dynamicItem.dynamicBoringLayoutText[imageKey]?.let {
             drawTextCache[imageKey]?.let { textBitmap = it } ?: run {
-                it.paint.isAntiAlias = true
-                textBitmap = Bitmap.createBitmap(
-                    drawingBitmap.width,
-                    drawingBitmap.height,
-                    Bitmap.Config.ARGB_8888
-                )
-                val textCanvas = Canvas(textBitmap!!)
-                textCanvas.translate(0f, ((drawingBitmap.height - it.height) / 2).toFloat())
-                it.draw(textCanvas)
-                drawTextCache[imageKey] = textBitmap!!
+                try {
+                    it.paint.isAntiAlias = true
+                    val tb = Bitmap.createBitmap(
+                        drawingBitmap.width,
+                        drawingBitmap.height,
+                        Bitmap.Config.ARGB_8888
+                    )
+                    val textCanvas = Canvas(tb)
+                    textCanvas.translate(0f, ((drawingBitmap.height - it.height) / 2).toFloat())
+                    it.draw(textCanvas)
+                    drawTextCache[imageKey] = tb
+                    textBitmap = tb
+                } catch (t: Throwable) {
+                    com.rui.compose.svga.utils.log.LogUtils.error("SvgaCanvasDrawer", "Failed to create dynamicBoringLayoutText bitmap", t)
+                    textBitmap = null
+                }
             }
         }
 
@@ -277,7 +350,7 @@ class SvgaCanvasDrawer(
             drawTextCache[imageKey]?.let { textBitmap = it } ?: run {
                 it.paint.isAntiAlias = true
                 val layout = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    val lineMax = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    val lineMax = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
                         it.maxLines
                     } else {
                         try {
@@ -313,35 +386,49 @@ class SvgaCanvasDrawer(
                         false
                     )
                 }
-                textBitmap = Bitmap.createBitmap(
-                    drawingBitmap.width,
-                    drawingBitmap.height,
-                    Bitmap.Config.ARGB_8888
-                )
-                val textCanvas = Canvas(textBitmap!!)
-                textCanvas.translate(0f, ((drawingBitmap.height - layout.height) / 2).toFloat())
-                layout.draw(textCanvas)
-                drawTextCache[imageKey] = textBitmap!!
+                try {
+                    val tb = Bitmap.createBitmap(
+                        drawingBitmap.width,
+                        drawingBitmap.height,
+                        Bitmap.Config.ARGB_8888
+                    )
+                    val textCanvas = Canvas(tb)
+                    textCanvas.translate(0f, ((drawingBitmap.height - layout.height) / 2).toFloat())
+                    layout.draw(textCanvas)
+                    drawTextCache[imageKey] = tb
+                    textBitmap = tb
+                } catch (t: Throwable) {
+                    com.rui.compose.svga.utils.log.LogUtils.error("SvgaCanvasDrawer", "Failed to create text bitmap", t)
+                    textBitmap = null
+                }
             }
         }
 
         textBitmap?.let { tb ->
+            if (tb.isRecycled) return@let
             val paint = this.sharedValues.sharedPaint()
             paint.isAntiAlias = videoItem.antiAlias
+            paint.isFilterBitmap = videoItem.antiAlias
             paint.alpha = (sprite.frameEntity.alpha * 255).toInt()
             if (sprite.frameEntity.maskPath != null) {
                 val maskPath = sprite.frameEntity.maskPath ?: return@let
-                canvas.save()
-                canvas.concat(frameMatrix)
-                canvas.clipRect(0, 0, drawingBitmap.width, drawingBitmap.height)
-                paint.shader = BitmapShader(tb, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT)
-                val path = this.sharedValues.sharedPath()
-                maskPath.buildPath(path)
-                canvas.drawPath(path, paint)
-                canvas.restore()
+                val count = canvas.save()
+                try {
+                    val originMatrix = obtainFrameMatrix(sprite.frameEntity.transform)
+                    val path = this.sharedValues.sharedPath()
+                    maskPath.buildPath(path)
+                    path.transform(originMatrix)
+                    canvas.clipPath(path)
+                    if (!tb.isRecycled) {
+                        canvas.drawBitmap(tb, frameMatrix, paint)
+                    }
+                } finally {
+                    canvas.restoreToCount(count)
+                }
             } else {
-                paint.isFilterBitmap = videoItem.antiAlias
-                canvas.drawBitmap(tb, frameMatrix, paint)
+                if (!tb.isRecycled) {
+                    canvas.drawBitmap(tb, frameMatrix, paint)
+                }
             }
         }
     }
@@ -370,15 +457,20 @@ class SvgaCanvasDrawer(
                         paint.color = color
                         val alpha = (sprite.frameEntity.alpha * 255).toInt().coerceIn(0, 255)
                         if (alpha != 255) paint.alpha = alpha
-                        if (sprite.frameEntity.maskPath != null) canvas.save()
-                        sprite.frameEntity.maskPath?.let { maskPath ->
-                            val path2 = this.sharedValues.sharedPath2()
-                            maskPath.buildPath(path2)
-                            path2.transform(frameMatrix)
-                            canvas.clipPath(path2)
+                        if (sprite.frameEntity.maskPath != null) {
+                            val count = canvas.save()
+                            try {
+                                val path2 = this.sharedValues.sharedPath2()
+                                sprite.frameEntity.maskPath?.buildPath(path2)
+                                path2.transform(frameMatrix)
+                                canvas.clipPath(path2)
+                                canvas.drawPath(path, paint)
+                            } finally {
+                                canvas.restoreToCount(count)
+                            }
+                        } else {
+                            canvas.drawPath(path, paint)
                         }
-                        canvas.drawPath(path, paint)
-                        if (sprite.frameEntity.maskPath != null) canvas.restore()
                     }
                 }
                 shape.styles?.strokeWidth?.let { width ->
@@ -408,24 +500,31 @@ class SvgaCanvasDrawer(
                         }
                         shape.styles?.miterLimit?.let { paint.strokeMiter = it.toFloat() * scale }
                         shape.styles?.lineDash?.let { dash ->
-                            if (dash.size == 3 && (dash[0] > 0 || dash[1] > 0)) {
-                                paint.pathEffect = DashPathEffect(
-                                    floatArrayOf(
-                                        dash[0].coerceAtLeast(1.0f) * scale,
-                                        dash[1].coerceAtLeast(0.1f) * scale
-                                    ), dash[2] * scale
-                                )
+                            if (scale > 0f && dash.size == 3 && (dash[0] > 0 || dash[1] > 0)) {
+                                val interval0 = (dash[0] * scale).coerceAtLeast(1.0f)
+                                val interval1 = (dash[1] * scale).coerceAtLeast(0.1f)
+                                try {
+                                    paint.pathEffect = DashPathEffect(
+                                        floatArrayOf(interval0, interval1),
+                                        dash[2] * scale
+                                    )
+                                } catch (_: Throwable) {}
                             }
                         }
-                        if (sprite.frameEntity.maskPath != null) canvas.save()
-                        sprite.frameEntity.maskPath?.let { maskPath ->
-                            val path2 = this.sharedValues.sharedPath2()
-                            maskPath.buildPath(path2)
-                            path2.transform(frameMatrix)
-                            canvas.clipPath(path2)
+                        if (sprite.frameEntity.maskPath != null) {
+                            val count = canvas.save()
+                            try {
+                                val path2 = this.sharedValues.sharedPath2()
+                                sprite.frameEntity.maskPath?.buildPath(path2)
+                                path2.transform(frameMatrix)
+                                canvas.clipPath(path2)
+                                canvas.drawPath(path, paint)
+                            } finally {
+                                canvas.restoreToCount(count)
+                            }
+                        } else {
+                            canvas.drawPath(path, paint)
                         }
-                        canvas.drawPath(path, paint)
-                        if (sprite.frameEntity.maskPath != null) canvas.restore()
                     }
                 }
             }
@@ -434,40 +533,51 @@ class SvgaCanvasDrawer(
 
     private fun matrixScale(matrix: Matrix): Float {
         matrix.getValues(matrixScaleTempValues)
-        if (matrixScaleTempValues[0] == 0f) return 0f
         var a = matrixScaleTempValues[0].toDouble()
         var b = matrixScaleTempValues[3].toDouble()
         var c = matrixScaleTempValues[1].toDouble()
         var d = matrixScaleTempValues[4].toDouble()
         if (a * d == b * c) return 0f
         val scaleX = Math.sqrt(a * a + b * b)
+        if (scaleX == 0.0) return 0f
         a /= scaleX; b /= scaleX
         val skew = a * c + b * d
         c -= a * skew; d -= b * skew
         val scaleY = Math.sqrt(c * c + d * d)
-        return if (scaleInfo.ratioX) Math.abs(scaleX.toFloat()) else Math.abs(scaleY.toFloat())
+        val result = if (scaleInfo.ratioX) Math.abs(scaleX.toFloat()) else Math.abs(scaleY.toFloat())
+        return if (result.isFinite() && result > 0f) result else 0f
     }
 
     private fun drawDynamic(sprite: SvgaDrawerSprite, canvas: Canvas, frameIndex: Int) {
         val imageKey = sprite.imageKey ?: return
         dynamicItem.dynamicDrawer[imageKey]?.let {
             val frameMatrix = obtainFrameMatrix(sprite.frameEntity.transform)
-            canvas.save()
-            canvas.concat(frameMatrix)
-            it.invoke(canvas, frameIndex)
-            canvas.restore()
+            val count = canvas.save()
+            try {
+                canvas.concat(frameMatrix)
+                it.invoke(canvas, frameIndex)
+            } catch (t: Throwable) {
+                com.rui.compose.svga.utils.log.LogUtils.error("SvgaCanvasDrawer", "Custom dynamicDrawer crashed for $imageKey", t)
+            } finally {
+                canvas.restoreToCount(count)
+            }
         }
         dynamicItem.dynamicDrawerSized[imageKey]?.let {
             val frameMatrix = obtainFrameMatrix(sprite.frameEntity.transform)
-            canvas.save()
-            canvas.concat(frameMatrix)
-            it.invoke(
-                canvas,
-                frameIndex,
-                sprite.frameEntity.layout.width.toInt(),
-                sprite.frameEntity.layout.height.toInt()
-            )
-            canvas.restore()
+            val count = canvas.save()
+            try {
+                canvas.concat(frameMatrix)
+                it.invoke(
+                    canvas,
+                    frameIndex,
+                    sprite.frameEntity.layout.width.toInt(),
+                    sprite.frameEntity.layout.height.toInt()
+                )
+            } catch (t: Throwable) {
+                com.rui.compose.svga.utils.log.LogUtils.error("SvgaCanvasDrawer", "Custom dynamicDrawerSized crashed for $imageKey", t)
+            } finally {
+                canvas.restoreToCount(count)
+            }
         }
     }
 
@@ -477,10 +587,15 @@ class SvgaCanvasDrawer(
         private val sharedPath2 = Path()
         private val sharedMatrix = Matrix()
         private val sharedMatrix2 = Matrix()
+        private val sharedRectF = RectF()
         private val matteXfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN)
         private val shareMattePaint = Paint().apply { xfermode = matteXfermode }
         private var sharedMatteBitmap: Bitmap? = null
         private var cachedMatteCanvas: Canvas? = null
+
+        fun sharedRectF(): RectF {
+            sharedRectF.setEmpty(); return sharedRectF
+        }
 
         fun sharedPaint(): Paint {
             sharedPaint.reset(); return sharedPaint
@@ -504,23 +619,37 @@ class SvgaCanvasDrawer(
 
         fun shareMattePaint(): Paint = shareMattePaint
 
-        fun sharedMatteBitmap(): Bitmap {
-            return sharedMatteBitmap!!
+        fun sharedMatteBitmap(): Bitmap? {
+            return sharedMatteBitmap
         }
 
-        fun obtainMatteCanvas(width: Int, height: Int): Canvas {
-            val w = width.coerceIn(1, 2048)
-            val h = height.coerceIn(1, 2048)
+        fun obtainMatteCanvas(width: Int, height: Int): Canvas? {
+            val w = width.coerceIn(1, 4096)
+            val h = height.coerceIn(1, 4096)
             var bmp = sharedMatteBitmap
             if (bmp == null || bmp.isRecycled || bmp.width < w || bmp.height < h) {
-                bmp?.recycle()
-                bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ALPHA_8)
-                sharedMatteBitmap = bmp
-                cachedMatteCanvas = Canvas(bmp)
+                try {
+                    val newBmp = Bitmap.createBitmap(w, h, Bitmap.Config.ALPHA_8)
+                    bmp?.recycle()
+                    bmp = newBmp
+                    sharedMatteBitmap = newBmp
+                    cachedMatteCanvas = Canvas(newBmp)
+                } catch (t: Throwable) {
+                    com.rui.compose.svga.utils.log.LogUtils.error("SvgaCanvasDrawer", "Failed to allocate matte bitmap", t)
+                    return null
+                }
             }
             val canvas = cachedMatteCanvas ?: Canvas(bmp).also { cachedMatteCanvas = it }
             canvas.drawColor(0, PorterDuff.Mode.CLEAR)
             return canvas
+        }
+
+        fun release() {
+            try {
+                sharedMatteBitmap?.let { if (!it.isRecycled) it.recycle() }
+            } catch (_: Throwable) {}
+            sharedMatteBitmap = null
+            cachedMatteCanvas = null
         }
     }
 

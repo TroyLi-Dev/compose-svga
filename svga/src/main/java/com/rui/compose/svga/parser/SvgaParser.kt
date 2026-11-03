@@ -74,6 +74,12 @@ class SvgaParser(
         // 在途网络下载请求合并表 (SingleFlight In-Flight Merging)，彻底消灭重复网络请求与并发资源竞争
         private val inFlightUrlTasks = ConcurrentHashMap<String, MutableList<ParseCompletion>>()
         private val inFlightLock = Any()
+
+        // 线上安全防范阈值：防范超大恶意流、Zip Bomb 攻击 (CWE-409)
+        private const val MAX_STREAM_BYTES = 60 * 1024 * 1024 // 单个 SVGA 流最大 60MB
+        private const val MAX_UNZIPPED_BYTES = 100 * 1024 * 1024L // 解压总大小上限 100MB
+        private const val MAX_ZIP_ENTRIES = 1000 // 解压文件条目数上限 1000
+        private const val MAX_INFLATED_BYTES = 50 * 1024 * 1024 // 解压缩 Protobuf 字节上限 50MB
     }
 
     private var frameWidth: Int = 0
@@ -146,6 +152,21 @@ class SvgaParser(
                     }
                     return null
                 }
+                val customFetcher = SvgaFetcherRegistry.findFetcher(model)
+                if (customFetcher != null && appContext != null) {
+                    threadPoolExecutor.execute {
+                        try {
+                            kotlinx.coroutines.runBlocking {
+                                val result = customFetcher.fetch(appContext, model)
+                                decodeAuto(result, callback)
+                            }
+                        } catch (t: Throwable) {
+                            val e = if (t is Exception) t else Exception(t)
+                            Handler(Looper.getMainLooper()).post { callback?.onError(e, model.toString()) }
+                        }
+                    }
+                    return null
+                }
                 callback?.onError(IllegalArgumentException("Unsupported SVGA model type: ${model.javaClass.name}"), model.toString())
                 return null
             }
@@ -161,13 +182,20 @@ class SvgaParser(
             handler.post { callback?.onError(Exception("Context is null"), name) }
             return
         }
-        val cleanPath = name.removePrefix("assets://").removePrefix("asset://").removePrefix("/")
+        var cleanPath = name.trim()
+        if (cleanPath.startsWith("assets://", ignoreCase = true)) {
+            cleanPath = cleanPath.substring(9)
+        } else if (cleanPath.startsWith("asset://", ignoreCase = true)) {
+            cleanPath = cleanPath.substring(8)
+        }
+        cleanPath = cleanPath.removePrefix("/")
         threadPoolExecutor.execute {
             try {
                 val inputStream = appContext.assets.open(cleanPath)
                 val cacheKey = SvgaDiskCache.buildCacheKey("assets://$cleanPath")
                 decodeFromInputStream(inputStream, cacheKey, callback, true, null, name)
-            } catch (e: Exception) {
+            } catch (t: Throwable) {
+                val e = if (t is Exception) t else Exception(t)
                 handler.post { callback?.onError(e, name) }
             }
         }
@@ -235,23 +263,22 @@ class SvgaParser(
             }
         }
 
-        if (!isFirst) {
-            // 已有相同 URL 任务在运行，当前请求已合并挂载，取消时仅移除自己
-            return {
-                synchronized(inFlightLock) {
-                    inFlightUrlTasks[cacheKey]?.remove(callback)
-                }
+        if (isFirst) {
+            threadPoolExecutor.execute {
+                doDownloadUrlMerged(url, cacheKey, cancelled, handler)
             }
         }
 
-        threadPoolExecutor.execute {
-            doDownloadUrlMerged(url, cacheKey, cancelled, handler)
-        }
-
         return {
-            cancelled.set(true)
             synchronized(inFlightLock) {
-                inFlightUrlTasks[cacheKey]?.remove(callback)
+                val list = inFlightUrlTasks[cacheKey]
+                if (list != null) {
+                    if (callback != null) list.remove(callback)
+                    if (list.isEmpty()) {
+                        cancelled.set(true)
+                        inFlightUrlTasks.remove(cacheKey)
+                    }
+                }
             }
         }
     }
@@ -273,19 +300,43 @@ class SvgaParser(
 
             var conn: java.net.HttpURLConnection? = null
             try {
-                conn = url.openConnection() as java.net.HttpURLConnection
-                conn.connectTimeout = 10000
-                conn.readTimeout = 20000
-                conn.setRequestProperty("User-Agent", "Mozilla/5.0 SVGA/Compose")
-                conn.connect()
+                var currentUrl = url
+                var redirects = 0
+                val maxRedirects = 5
 
-                val responseCode = conn.responseCode
-                if (responseCode !in 200..299) {
-                    throw SvgaException.FetchException(
-                        source = url.toString(),
-                        httpCode = responseCode,
-                        message = "HTTP error $responseCode: ${conn.responseMessage}"
-                    )
+                while (true) {
+                    val c = currentUrl.openConnection() as java.net.HttpURLConnection
+                    conn = c
+                    c.connectTimeout = 10000
+                    c.readTimeout = 20000
+                    c.instanceFollowRedirects = false
+                    c.setRequestProperty("User-Agent", "Mozilla/5.0 SVGA/Compose")
+                    c.connect()
+
+                    val responseCode = c.responseCode
+                    if (responseCode in 300..399) {
+                        val location = c.getHeaderField("Location")
+                        c.disconnect()
+                        if (redirects++ < maxRedirects && !location.isNullOrEmpty()) {
+                            currentUrl = URL(currentUrl, location)
+                            continue
+                        } else {
+                            throw SvgaException.FetchException(
+                                source = url.toString(),
+                                httpCode = responseCode,
+                                message = "Too many redirects or missing Location header: $location"
+                            )
+                        }
+                    }
+
+                    if (responseCode !in 200..299) {
+                        throw SvgaException.FetchException(
+                            source = url.toString(),
+                            httpCode = responseCode,
+                            message = "HTTP error $responseCode: ${c.responseMessage}"
+                        )
+                    }
+                    break
                 }
 
                 val bytes = readStreamToByteArray(conn.inputStream)
@@ -298,9 +349,16 @@ class SvgaParser(
                 val entity = synchronized(lock) {
                     if (isZipFile(bytes)) {
                         if (!cacheDir.exists() || cacheDir.listFiles().isNullOrEmpty()) {
-                            unzip(ByteArrayInputStream(bytes), cacheDir)
+                            unzipAtomic(ByteArrayInputStream(bytes), cacheDir)
                         }
-                        loadFromCacheDir(cacheDir)
+                        try {
+                            loadFromCacheDir(cacheDir)
+                        } catch (e: Exception) {
+                            LogUtils.warn(TAG, "Corrupted cacheDir for $url, purging and re-unzipping: ${e.message}")
+                            cacheDir.deleteRecursively()
+                            unzipAtomic(ByteArrayInputStream(bytes), cacheDir)
+                            loadFromCacheDir(cacheDir)
+                        }
                     } else {
                         val inflatedBytes = inflate(bytes) ?: throw SvgaException.DecodeException(
                             url.toString(),
@@ -308,7 +366,7 @@ class SvgaParser(
                             "Inflate failed"
                         )
                         val movieEntity = MovieEntity.ADAPTER.decode(inflatedBytes)
-                        SvgaVideoEntity(movieEntity, cacheDir, frameWidth, frameHeight, false)
+                        SvgaVideoEntity(movieEntity, cacheDir, frameWidth, frameHeight, needCutBitmap)
                     }
                 }
                 entity.cacheKey = cacheKey
@@ -323,7 +381,8 @@ class SvgaParser(
                     }
                 })
                 return // 成功完成并已回调，直接返回退出重试循环！
-            } catch (e: Exception) {
+            } catch (t: Throwable) {
+                val e = if (t is Exception) t else Exception(t)
                 lastException = e
                 LogUtils.warn(TAG, "Download attempt ${attempt + 1}/$maxRetries failed for $url: ${e.message}")
                 if (attempt < maxRetries && !cancelled.get()) {
@@ -358,7 +417,8 @@ class SvgaParser(
         threadPoolExecutor.execute {
             try {
                 decodeFromInputStream(FileInputStream(file), cacheKey, callback, true, null, file.name)
-            } catch (e: Exception) {
+            } catch (t: Throwable) {
+                val e = if (t is Exception) t else Exception(t)
                 handler.post { callback?.onError(e, file.name) }
             }
         }
@@ -390,9 +450,16 @@ class SvgaParser(
                 synchronized(lock) {
                     if (isZipFile(bytes)) {
                         if (!cacheDir.exists() || cacheDir.listFiles().isNullOrEmpty()) {
-                            unzip(ByteArrayInputStream(bytes), cacheDir)
+                            unzipAtomic(ByteArrayInputStream(bytes), cacheDir)
                         }
-                        val entity = loadFromCacheDir(cacheDir)
+                        val entity = try {
+                            loadFromCacheDir(cacheDir)
+                        } catch (e: Exception) {
+                            LogUtils.warn(TAG, "Corrupted cacheDir for $cacheKey, purging and re-unzipping: ${e.message}")
+                            cacheDir.deleteRecursively()
+                            unzipAtomic(ByteArrayInputStream(bytes), cacheDir)
+                            loadFromCacheDir(cacheDir)
+                        }
                         entity.cacheKey = cacheKey
                         entity.prepare({
                             SvgaMemoryCache.instance.put(cacheKey, entity)
@@ -406,7 +473,7 @@ class SvgaParser(
                                 cacheDir,
                                 frameWidth,
                                 frameHeight,
-                                false
+                                needCutBitmap
                             )
                             entity.cacheKey = cacheKey
                             entity.prepare({
@@ -416,18 +483,25 @@ class SvgaParser(
                         } ?: throw SvgaException.DecodeException(alias, DecodeReason.INVALID_PROTOBUF, "Inflate failed")
                     }
                 }
-            } catch (e: Exception) {
+            } catch (t: Throwable) {
+                val e = if (t is Exception) t else Exception(t)
                 handler.post { callback?.onError(e, alias) }
             } finally {
                 if (closeStream) try { inputStream.close() } catch (_: Exception) {}
             }
         }
 
-        if (Looper.myLooper() == Looper.getMainLooper()) {
-            threadPoolExecutor.execute(decodeTask)
-        } else {
-            // 已在非主线程，直接同线程同步解码，消除二次排队与线程池队列压力
-            decodeTask.run()
+        try {
+            if (Looper.myLooper() == Looper.getMainLooper()) {
+                threadPoolExecutor.execute(decodeTask)
+            } else {
+                // 已在非主线程，直接同线程同步解码，消除二次排队与线程池队列压力
+                decodeTask.run()
+            }
+        } catch (t: Throwable) {
+            if (closeStream) try { inputStream.close() } catch (_: Exception) {}
+            val e = if (t is Exception) t else Exception(t)
+            handler.post { callback?.onError(e, alias) }
         }
     }
 
@@ -437,23 +511,51 @@ class SvgaParser(
         val entity = when {
             binaryFile.exists() -> {
                 val movieEntity = MovieEntity.ADAPTER.decode(binaryFile.readBytes())
-                SvgaVideoEntity(movieEntity, cacheDir, frameWidth, frameHeight, false)
+                SvgaVideoEntity(movieEntity, cacheDir, frameWidth, frameHeight, needCutBitmap)
             }
             specFile.exists() -> {
-                SvgaVideoEntity(JSONObject(specFile.readText()), cacheDir, frameWidth, frameHeight, false)
+                SvgaVideoEntity(JSONObject(specFile.readText()), cacheDir, frameWidth, frameHeight, needCutBitmap)
             }
             else -> throw SvgaException.DecodeException(cacheDir.name, DecodeReason.MISSING_SPEC, "Metadata not found in $cacheDir")
         }
         return entity
     }
 
+    private fun unzipAtomic(inputStream: InputStream, cacheDir: File) {
+        val parent = cacheDir.parentFile ?: cacheDir
+        val tmpDir = File(parent, "${cacheDir.name}_tmp_${System.nanoTime()}")
+        tmpDir.mkdirs()
+        try {
+            unzip(inputStream, tmpDir)
+            if (cacheDir.exists()) cacheDir.deleteRecursively()
+            if (!tmpDir.renameTo(cacheDir)) {
+                tmpDir.copyRecursively(cacheDir, overwrite = true)
+                tmpDir.deleteRecursively()
+            }
+        } catch (t: Throwable) {
+            tmpDir.deleteRecursively()
+            throw t
+        }
+    }
+
     private fun unzip(inputStream: InputStream, cacheDir: File) {
         val canonicalDest = cacheDir.canonicalPath
+        var totalUncompressedBytes = 0L
+        var totalEntries = 0
         ZipInputStream(BufferedInputStream(inputStream)).use { zis ->
             var entry = zis.nextEntry
             while (entry != null) {
+                totalEntries++
+                if (totalEntries > MAX_ZIP_ENTRIES) {
+                    throw SvgaException.DecodeException(
+                        entry.name,
+                        DecodeReason.ZIP_SLIP_SECURITY,
+                        "Zip Bomb detected: exceeded $MAX_ZIP_ENTRIES entries"
+                    )
+                }
                 val file = File(cacheDir, entry.name)
-                if (!file.canonicalPath.startsWith(canonicalDest + File.separator)) {
+                val canonicalFile = file.canonicalPath
+                if (!canonicalFile.startsWith(canonicalDest + File.separator) && canonicalFile != canonicalDest) {
                     throw SvgaException.DecodeException(entry.name, DecodeReason.ZIP_SLIP_SECURITY, "Zip Slip detected: ${entry.name}")
                 }
                 if (entry.isDirectory) {
@@ -464,6 +566,14 @@ class SvgaParser(
                         val buffer = ByteArray(4096)
                         var len: Int
                         while (zis.read(buffer).also { len = it } > 0) {
+                            totalUncompressedBytes += len
+                            if (totalUncompressedBytes > MAX_UNZIPPED_BYTES) {
+                                throw SvgaException.DecodeException(
+                                    entry.name,
+                                    DecodeReason.ZIP_SLIP_SECURITY,
+                                    "Zip Bomb detected: uncompressed size exceeded $MAX_UNZIPPED_BYTES bytes"
+                                )
+                            }
                             fos.write(buffer, 0, len)
                         }
                     }
@@ -485,13 +595,21 @@ class SvgaParser(
             inflater.setInput(byteArray, 0, byteArray.size)
             val result = ByteArray(4096)
             val baos = ByteArrayOutputStream()
+            var totalBytes = 0
             while (!inflater.finished()) {
                 val count = inflater.inflate(result)
-                if (count > 0) baos.write(result, 0, count) else break
+                if (count > 0) {
+                    totalBytes += count
+                    if (totalBytes > MAX_INFLATED_BYTES) {
+                        LogUtils.error(TAG, "Inflated data exceeded maximum limit of $MAX_INFLATED_BYTES bytes")
+                        return null
+                    }
+                    baos.write(result, 0, count)
+                } else break
             }
             baos.toByteArray()
-        } catch (e: Exception) {
-            LogUtils.error(TAG, "Inflate failed", e)
+        } catch (t: Throwable) {
+            LogUtils.error(TAG, "Inflate failed", t)
             null
         } finally {
             inflater.end()
@@ -502,7 +620,16 @@ class SvgaParser(
         val buffer = ByteArray(4096)
         val baos = ByteArrayOutputStream()
         var len: Int
+        var totalBytes = 0
         while (inputStream.read(buffer).also { len = it } != -1) {
+            totalBytes += len
+            if (totalBytes > MAX_STREAM_BYTES) {
+                throw SvgaException.DecodeException(
+                    "stream",
+                    DecodeReason.EMPTY_STREAM,
+                    "SVGA stream exceeded maximum allowed size ($MAX_STREAM_BYTES bytes)"
+                )
+            }
             baos.write(buffer, 0, len)
         }
         return baos.toByteArray()

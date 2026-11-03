@@ -4,6 +4,7 @@ import android.animation.Animator
 import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.content.Context
+import android.os.Build
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.animation.LinearInterpolator
@@ -102,7 +103,7 @@ open class SvgaImageView @JvmOverloads constructor(
             cached.antiAlias = antiAlias
             setVideoItem(cached)
             onComplete?.invoke(cached)
-            if (autoPlay) {
+            if (autoPlay && (Build.VERSION.SDK_INT < Build.VERSION_CODES.KITKAT || isAttachedToWindow)) {
                 startAnimation()
             }
             return
@@ -114,7 +115,7 @@ open class SvgaImageView @JvmOverloads constructor(
                     videoItem.antiAlias = antiAlias
                     setVideoItem(videoItem)
                     onComplete?.invoke(videoItem)
-                    if (autoPlay) {
+                    if (autoPlay && (Build.VERSION.SDK_INT < Build.VERSION_CODES.KITKAT || isAttachedToWindow)) {
                         startAnimation()
                     }
                 }
@@ -125,6 +126,20 @@ open class SvgaImageView @JvmOverloads constructor(
             }
         })
         currentParseCancelTask = cancelTask
+    }
+
+    override fun setImageDrawable(drawable: android.graphics.drawable.Drawable?) {
+        val oldDrawable = getSvgaDrawable()
+        if (oldDrawable != null && oldDrawable !== drawable) {
+            stopAnimation(false)
+        }
+        super.setImageDrawable(drawable)
+        (drawable as? SvgaDrawable)?.scaleType = this.scaleType
+    }
+
+    override fun setScaleType(scaleType: ScaleType?) {
+        super.setScaleType(scaleType)
+        scaleType?.let { getSvgaDrawable()?.scaleType = it }
     }
 
     fun setVideoItem(videoItem: SvgaVideoEntity?) {
@@ -203,11 +218,14 @@ open class SvgaImageView @JvmOverloads constructor(
         pauseAnimation()
         val drawable = getSvgaDrawable() ?: return
         val targetFrame = frame.coerceIn(0, max(0, drawable.videoEntity.frames - 1))
+        drawable.cleared = false
         drawable.currentFrame = targetFrame
         if (andPlay) {
             startAnimation()
             animator?.let { anim ->
-                val ratio = targetFrame.toFloat() / max(1, drawable.videoEntity.frames)
+                val totalSpan = max(1, endFrame - startFrame + 1)
+                val offsetInSpan = (targetFrame - startFrame).coerceIn(0, totalSpan - 1)
+                val ratio = offsetInSpan.toFloat() / totalSpan
                 anim.currentPlayTime = (ratio * anim.duration).toLong()
             }
         }
@@ -252,7 +270,11 @@ open class SvgaImageView @JvmOverloads constructor(
         }
         val drawable = getSvgaDrawable() ?: return super.onTouchEvent(event)
         for ((key, value) in drawable.dynamicEntity.clickMap) {
-            if (event.x >= value[0] && event.x <= value[2] && event.y >= value[1] && event.y <= value[3]) {
+            val minX = kotlin.math.min(value[0], value[2])
+            val maxX = kotlin.math.max(value[0], value[2])
+            val minY = kotlin.math.min(value[1], value[3])
+            val maxY = kotlin.math.max(value[1], value[3])
+            if (event.x >= minX && event.x <= maxX && event.y >= minY && event.y <= maxY) {
                 itemClickAreaListener?.let {
                     it.onClick(key)
                     return true
@@ -268,6 +290,28 @@ open class SvgaImageView @JvmOverloads constructor(
         super.onAttachedToWindow()
         if (autoPlay && getSvgaDrawable() != null && !isAnimating) {
             startAnimation()
+        }
+    }
+
+    override fun onVisibilityChanged(changedView: android.view.View, visibility: Int) {
+        super.onVisibilityChanged(changedView, visibility)
+        if (isShown) {
+            if (wasAnimatingBeforeHide && (Build.VERSION.SDK_INT < Build.VERSION_CODES.KITKAT || isAttachedToWindow)) {
+                wasAnimatingBeforeHide = false
+                if (animator?.isPaused == true) {
+                    animator?.resume()
+                    isAnimating = true
+                } else if (!isAnimating && autoPlay) {
+                    startAnimation()
+                }
+            }
+        } else {
+            if (isAnimating) {
+                wasAnimatingBeforeHide = true
+                animator?.pause()
+                getSvgaDrawable()?.stop()
+                isAnimating = false
+            }
         }
     }
 

@@ -2,8 +2,6 @@ package com.rui.compose.svga.controller
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
-import androidx.compose.runtime.State
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -64,7 +62,7 @@ class SvgaController(
 
     /** 当前播放进度 (0.0f ~ 1.0f) */
     val progress: Float
-        get() = if (totalFrames > 0) (currentFrame.toFloat() / totalFrames).coerceIn(0f, 1f) else 0f
+        get() = if (totalFrames > 0) ((currentFrame + 1).toFloat() / totalFrames).coerceIn(0f, 1f) else 0f
 
     /** 是否正在播放中 */
     val isPlaying: Boolean

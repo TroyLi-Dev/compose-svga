@@ -13,6 +13,9 @@ import com.rui.compose.svga.utils.log.LogUtils
 import java.net.HttpURLConnection
 import java.net.URL
 
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
+
 interface SvgaClickAreaListener {
     fun onResponseArea(key: String, x0: Int, y0: Int, x1: Int, y1: Int)
 }
@@ -22,20 +25,30 @@ interface SvgaClickAreaListener {
  */
 class SvgaDynamicEntity {
 
-    internal var dynamicHidden: HashMap<String, Boolean> = hashMapOf()
-    internal var dynamicImage: HashMap<String, Bitmap> = hashMapOf()
-    internal var dynamicText: HashMap<String, String> = hashMapOf()
-    internal var dynamicTextPaint: HashMap<String, TextPaint> = hashMapOf()
-    internal var dynamicStaticLayoutText: HashMap<String, StaticLayout> = hashMapOf()
-    internal var dynamicBoringLayoutText: HashMap<String, BoringLayout> = hashMapOf()
-    internal var dynamicDrawer: HashMap<String, (canvas: Canvas, frameIndex: Int) -> Boolean> = hashMapOf()
-    internal var dynamicClickArea: HashMap<String, SvgaClickAreaListener> = hashMapOf()
-    internal var dynamicDrawerSized: HashMap<String, (canvas: Canvas, frameIndex: Int, width: Int, height: Int) -> Boolean> = hashMapOf()
-    internal var clickMap: HashMap<String, IntArray> = hashMapOf()
+    internal var dynamicHidden: ConcurrentHashMap<String, Boolean> = ConcurrentHashMap()
+    internal var dynamicImage: ConcurrentHashMap<String, Bitmap> = ConcurrentHashMap()
+    internal var dynamicText: ConcurrentHashMap<String, String> = ConcurrentHashMap()
+    internal var dynamicTextPaint: ConcurrentHashMap<String, TextPaint> = ConcurrentHashMap()
+    internal var dynamicStaticLayoutText: ConcurrentHashMap<String, StaticLayout> = ConcurrentHashMap()
+    internal var dynamicBoringLayoutText: ConcurrentHashMap<String, BoringLayout> = ConcurrentHashMap()
+    internal var dynamicDrawer: ConcurrentHashMap<String, (canvas: Canvas, frameIndex: Int) -> Boolean> = ConcurrentHashMap()
+    internal var dynamicClickArea: ConcurrentHashMap<String, SvgaClickAreaListener> = ConcurrentHashMap()
+    internal var dynamicDrawerSized: ConcurrentHashMap<String, (canvas: Canvas, frameIndex: Int, width: Int, height: Int) -> Boolean> = ConcurrentHashMap()
+    internal var clickMap: ConcurrentHashMap<String, IntArray> = ConcurrentHashMap()
+    @Volatile
     internal var isTextDirty = false
 
-    var dynamicSize = 0
-    var loadOkSize = 0
+    private val _dynamicSize = AtomicInteger(0)
+    private val _loadOkSize = AtomicInteger(0)
+
+    var dynamicSize: Int
+        get() = _dynamicSize.get()
+        set(value) = _dynamicSize.set(value)
+
+    var loadOkSize: Int
+        get() = _loadOkSize.get()
+        set(value) = _loadOkSize.set(value)
+
     private var replaceFinish: ReplaceFinish? = null
 
     interface ReplaceFinish {
@@ -58,28 +71,65 @@ class SvgaDynamicEntity {
     }
 
     private fun notifyResReplaced() {
-        loadOkSize++
-        if (loadOkSize == dynamicSize) {
+        val total = _dynamicSize.get()
+        if (total > 0 && _loadOkSize.incrementAndGet() >= total) {
             replaceFinish?.replaceFinish()
         }
     }
 
     fun setDynamicImage(url: String, forKey: String): SvgaDynamicEntity {
+        _dynamicSize.incrementAndGet()
         val handler = Handler(Looper.getMainLooper())
         SvgaParser.threadPoolExecutor.execute {
             var conn: HttpURLConnection? = null
             try {
-                conn = URL(url).openConnection() as? HttpURLConnection
-                conn?.connectTimeout = 20000
-                conn?.requestMethod = "GET"
-                conn?.connect()
-                conn?.inputStream?.use { stream ->
-                    BitmapFactory.decodeStream(stream)?.let { bitmap ->
-                        handler.post { setDynamicImage(bitmap, forKey) }
+                var currentUrl = URL(url)
+                var redirects = 0
+                val maxRedirects = 5
+                while (true) {
+                    val c = currentUrl.openConnection() as? HttpURLConnection ?: break
+                    conn = c
+                    c.connectTimeout = 15000
+                    c.readTimeout = 20000
+                    c.instanceFollowRedirects = false
+                    c.requestMethod = "GET"
+                    c.connect()
+
+                    val responseCode = c.responseCode
+                    if (responseCode in 300..399) {
+                        val location = c.getHeaderField("Location")
+                        c.disconnect()
+                        if (redirects++ < maxRedirects && !location.isNullOrEmpty()) {
+                            currentUrl = URL(currentUrl, location)
+                            continue
+                        } else {
+                            break
+                        }
                     }
+                    if (responseCode !in 200..299) {
+                        break
+                    }
+                    break
                 }
-            } catch (e: Exception) {
-                LogUtils.error("SvgaDynamicEntity", "Failed to load dynamic image from $url", e)
+
+                conn?.inputStream?.use { stream ->
+                    val bitmap = try {
+                        BitmapFactory.decodeStream(stream)
+                    } catch (t: Throwable) {
+                        LogUtils.error("SvgaDynamicEntity", "OOM decoding dynamic image from $url", t)
+                        null
+                    }
+                    if (bitmap != null) {
+                        handler.post { setDynamicImage(bitmap, forKey) }
+                    } else {
+                        handler.post { notifyResReplaced() }
+                    }
+                } ?: run {
+                    handler.post { notifyResReplaced() }
+                }
+            } catch (t: Throwable) {
+                LogUtils.error("SvgaDynamicEntity", "Failed to load dynamic image from $url", t)
+                handler.post { notifyResReplaced() }
             } finally {
                 try { conn?.disconnect() } catch (_: Throwable) {}
             }
@@ -124,14 +174,18 @@ class SvgaDynamicEntity {
     fun setClickArea(clickKey: String): SvgaDynamicEntity {
         dynamicClickArea[clickKey] = object : SvgaClickAreaListener {
             override fun onResponseArea(key: String, x0: Int, y0: Int, x1: Int, y1: Int) {
+                val minX = kotlin.math.min(x0, x1)
+                val maxX = kotlin.math.max(x0, x1)
+                val minY = kotlin.math.min(y0, y1)
+                val maxY = kotlin.math.max(y0, y1)
                 val area = clickMap[key]
                 if (area == null) {
-                    clickMap[key] = intArrayOf(x0, y0, x1, y1)
+                    clickMap[key] = intArrayOf(minX, minY, maxX, maxY)
                 } else {
-                    area[0] = x0
-                    area[1] = y0
-                    area[2] = x1
-                    area[3] = y1
+                    area[0] = minX
+                    area[1] = minY
+                    area[2] = maxX
+                    area[3] = maxY
                 }
             }
         }

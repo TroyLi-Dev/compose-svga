@@ -49,6 +49,7 @@ class SvgaVideoShapeEntity {
     val isKeep: Boolean
         get() = type == Type.keep
 
+    @Volatile
     var shapePath: Path? = null
 
     constructor(obj: JSONObject) {
@@ -134,10 +135,10 @@ class SvgaVideoShapeEntity {
                     val mulValue = checkValueRange(arr)
                     val alphaRangeValue = checkAlphaValueRange(arr)
                     styles.fill = Color.argb(
-                        (arr.optDouble(3) * alphaRangeValue).toInt(),
-                        (arr.optDouble(0) * mulValue).toInt(),
-                        (arr.optDouble(1) * mulValue).toInt(),
-                        (arr.optDouble(2) * mulValue).toInt()
+                        (arr.optDouble(3) * alphaRangeValue).toInt().coerceIn(0, 255),
+                        (arr.optDouble(0) * mulValue).toInt().coerceIn(0, 255),
+                        (arr.optDouble(1) * mulValue).toInt().coerceIn(0, 255),
+                        (arr.optDouble(2) * mulValue).toInt().coerceIn(0, 255)
                     )
                 }
             }
@@ -146,10 +147,10 @@ class SvgaVideoShapeEntity {
                     val mulValue = checkValueRange(arr)
                     val alphaRangeValue = checkAlphaValueRange(arr)
                     styles.stroke = Color.argb(
-                        (arr.optDouble(3) * alphaRangeValue).toInt(),
-                        (arr.optDouble(0) * mulValue).toInt(),
-                        (arr.optDouble(1) * mulValue).toInt(),
-                        (arr.optDouble(2) * mulValue).toInt()
+                        (arr.optDouble(3) * alphaRangeValue).toInt().coerceIn(0, 255),
+                        (arr.optDouble(0) * mulValue).toInt().coerceIn(0, 255),
+                        (arr.optDouble(1) * mulValue).toInt().coerceIn(0, 255),
+                        (arr.optDouble(2) * mulValue).toInt().coerceIn(0, 255)
                     )
                 }
             }
@@ -182,20 +183,20 @@ class SvgaVideoShapeEntity {
                 val mulValue = checkValueRange(color)
                 val alphaRangeValue = checkAlphaValueRange(color)
                 styles.fill = Color.argb(
-                    (color.a * alphaRangeValue).toInt(),
-                    (color.r * mulValue).toInt(),
-                    (color.g * mulValue).toInt(),
-                    (color.b * mulValue).toInt()
+                    (color.a * alphaRangeValue).toInt().coerceIn(0, 255),
+                    (color.r * mulValue).toInt().coerceIn(0, 255),
+                    (color.g * mulValue).toInt().coerceIn(0, 255),
+                    (color.b * mulValue).toInt().coerceIn(0, 255)
                 )
             }
             it.stroke?.let { color ->
                 val mulValue = checkValueRange(color)
                 val alphaRangeValue = checkAlphaValueRange(color)
                 styles.stroke = Color.argb(
-                    (color.a * alphaRangeValue).toInt(),
-                    (color.r * mulValue).toInt(),
-                    (color.g * mulValue).toInt(),
-                    (color.b * mulValue).toInt()
+                    (color.a * alphaRangeValue).toInt().coerceIn(0, 255),
+                    (color.r * mulValue).toInt().coerceIn(0, 255),
+                    (color.g * mulValue).toInt().coerceIn(0, 255),
+                    (color.b * mulValue).toInt().coerceIn(0, 255)
                 )
             }
             styles.strokeWidth = it.strokeWidth
@@ -234,8 +235,10 @@ class SvgaVideoShapeEntity {
             arr[6] = 0.0f
             arr[7] = 0.0f
             arr[8] = 1.0f
-            transform.setValues(arr)
-            this.transform = transform
+            if (arr.all { v -> v.isFinite() }) {
+                transform.setValues(arr)
+                this.transform = transform
+            }
         }
     }
 
@@ -252,8 +255,10 @@ class SvgaVideoShapeEntity {
             arr[6] = 0.0f
             arr[7] = 0.0f
             arr[8] = 1.0f
-            transform.setValues(arr)
-            this.transform = transform
+            if (arr.all { v -> v.isFinite() }) {
+                transform.setValues(arr)
+                this.transform = transform
+            }
         }
     }
 
@@ -269,33 +274,33 @@ class SvgaVideoShapeEntity {
                     }
                 }
                 Type.ellipse -> {
-                    val xv = this.args?.get("x") as? Number ?: return
-                    val yv = this.args?.get("y") as? Number ?: return
-                    val rxv = this.args?.get("radiusX") as? Number ?: return
-                    val ryv = this.args?.get("radiusY") as? Number ?: return
-                    val x = xv.toFloat()
-                    val y = yv.toFloat()
-                    val rx = rxv.toFloat()
-                    val ry = ryv.toFloat()
+                    val x = (this.args?.get("x") as? Number)?.toFloat() ?: 0f
+                    val y = (this.args?.get("y") as? Number)?.toFloat() ?: 0f
+                    val rx = (this.args?.get("radiusX") as? Number)?.toFloat() ?: return
+                    val ry = (this.args?.get("radiusY") as? Number)?.toFloat() ?: return
+                    if (rx <= 0f || ry <= 0f || !x.isFinite() || !y.isFinite() || !rx.isFinite() || !ry.isFinite()) return
                     localPath.addOval(RectF(x - rx, y - ry, x + rx, y + ry), Path.Direction.CW)
                 }
                 Type.rect -> {
-                    val xv = this.args?.get("x") as? Number ?: return
-                    val yv = this.args?.get("y") as? Number ?: return
-                    val wv = this.args?.get("width") as? Number ?: return
-                    val hv = this.args?.get("height") as? Number ?: return
-                    val crv = this.args?.get("cornerRadius") as? Number ?: return
-                    val x = xv.toFloat()
-                    val y = yv.toFloat()
-                    val width = wv.toFloat()
-                    val height = hv.toFloat()
-                    val cornerRadius = crv.toFloat()
-                    localPath.addRoundRect(
-                        RectF(x, y, x + width, y + height),
-                        cornerRadius,
-                        cornerRadius,
-                        Path.Direction.CW
-                    )
+                    val x = (this.args?.get("x") as? Number)?.toFloat() ?: 0f
+                    val y = (this.args?.get("y") as? Number)?.toFloat() ?: 0f
+                    val width = (this.args?.get("width") as? Number)?.toFloat() ?: return
+                    val height = (this.args?.get("height") as? Number)?.toFloat() ?: return
+                    val cornerRadius = (this.args?.get("cornerRadius") as? Number)?.toFloat() ?: 0f
+                    if (width <= 0f || height <= 0f || !x.isFinite() || !y.isFinite() || !width.isFinite() || !height.isFinite()) return
+                    if (cornerRadius > 0f) {
+                        localPath.addRoundRect(
+                            RectF(x, y, x + width, y + height),
+                            cornerRadius,
+                            cornerRadius,
+                            Path.Direction.CW
+                        )
+                    } else {
+                        localPath.addRect(
+                            RectF(x, y, x + width, y + height),
+                            Path.Direction.CW
+                        )
+                    }
                 }
                 Type.keep -> {}
             }

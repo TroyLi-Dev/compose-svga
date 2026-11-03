@@ -22,7 +22,7 @@ class SvgaVideoSpriteFrameEntity {
     var shapes: List<SvgaVideoShapeEntity> = emptyList()
 
     constructor(obj: JSONObject) {
-        this.alpha = obj.optDouble("alpha", 0.0)
+        this.alpha = obj.optDouble("alpha", 0.0).coerceIn(0.0, 1.0)
         obj.optJSONObject("layout")?.let {
             this.layout = SvgaRect(
                 it.optDouble("x", 0.0),
@@ -42,7 +42,11 @@ class SvgaVideoSpriteFrameEntity {
             arr[6] = 0.0f
             arr[7] = 0.0f
             arr[8] = 1.0f
-            this.transform.setValues(arr)
+            if (arr.all { v -> v.isFinite() }) {
+                this.transform.setValues(arr)
+            } else {
+                this.transform.reset()
+            }
         }
         obj.optString("clipPath").let {
             if (it.isNotEmpty()) {
@@ -61,7 +65,7 @@ class SvgaVideoSpriteFrameEntity {
     }
 
     constructor(obj: FrameEntity) {
-        this.alpha = obj.alpha.toDouble()
+        this.alpha = obj.alpha.toDouble().coerceIn(0.0, 1.0)
         obj.layout?.let {
             this.layout = SvgaRect(
                 it.x.toDouble(),
@@ -81,9 +85,13 @@ class SvgaVideoSpriteFrameEntity {
             arr[6] = 0.0f
             arr[7] = 0.0f
             arr[8] = 1.0f
-            this.transform.setValues(arr)
+            if (arr.all { v -> v.isFinite() }) {
+                this.transform.setValues(arr)
+            } else {
+                this.transform.reset()
+            }
         }
-        if (obj.clipPath.isNotEmpty()) {
+        if (!obj.clipPath.isNullOrEmpty()) {
             this.maskPath = SvgaPathEntity(obj.clipPath)
         }
         this.shapes = obj.shapes.map { SvgaVideoShapeEntity(it) }

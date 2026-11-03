@@ -4,7 +4,7 @@ plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
-    id("com.squareup.wire") version "5.4.0"
+    alias(libs.plugins.wire)
     id("maven-publish")
 }
 

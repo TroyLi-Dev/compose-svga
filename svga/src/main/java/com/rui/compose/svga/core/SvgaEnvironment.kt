@@ -49,25 +49,34 @@ internal object SvgaEnvironment {
     private val frameCallback = object : Choreographer.FrameCallback {
         override fun doFrame(frameTimeNanos: Long) {
             isChoreographerScheduled = false
-            if (refCount <= 0 || listeners.isEmpty()) {
+            if (listeners.isEmpty()) {
                 return // 无活跃监听，彻底休眠
             }
 
             tickState.longValue = frameTimeNanos
 
             for (listener in listeners) {
-                listener.onTick(frameTimeNanos)
+                try {
+                    listener.onTick(frameTimeNanos)
+                } catch (t: Throwable) {
+                    com.rui.compose.svga.utils.log.LogUtils.error("SvgaEnvironment", "Error in tick listener", t)
+                }
             }
 
             frameCount++
-            if (lastFpsTime == 0L) lastFpsTime = frameTimeNanos
-            if (frameTimeNanos - lastFpsTime >= 1_000_000_000L) {
-                loadState.value = SystemLoad(currentFps = frameCount)
+            if (lastFpsTime == 0L || frameTimeNanos - lastFpsTime > 1_500_000_000L) {
+                // 如果采样间隔过大（切到后台再切回），重置采样时间戳，避免错误计算出超低 FPS
+                lastFpsTime = frameTimeNanos
+                frameCount = 0
+            } else if (frameTimeNanos - lastFpsTime >= 1_000_000_000L) {
+                val elapsedSeconds = (frameTimeNanos - lastFpsTime).toDouble() / 1_000_000_000.0
+                val calculatedFps = (frameCount / elapsedSeconds).toInt()
+                loadState.value = SystemLoad(currentFps = calculatedFps)
                 frameCount = 0
                 lastFpsTime = frameTimeNanos
             }
 
-            if (refCount > 0 && listeners.isNotEmpty()) {
+            if (listeners.isNotEmpty()) {
                 isChoreographerScheduled = true
                 Choreographer.getInstance().postFrameCallback(this)
             }
@@ -101,27 +110,17 @@ internal object SvgaEnvironment {
     @Synchronized
     fun attach() {
         refCount++
-        ensureChoreographerScheduled()
     }
 
     @Synchronized
     fun detach() {
         if (refCount > 0) refCount--
-        if (refCount <= 0 && isChoreographerScheduled) {
-            val unschedule = {
-                if (refCount <= 0 && isChoreographerScheduled) {
-                    Choreographer.getInstance().removeFrameCallback(frameCallback)
-                    isChoreographerScheduled = false
-                }
-            }
-            if (Looper.myLooper() == Looper.getMainLooper()) unschedule() else mainHandler.post(unschedule)
-        }
     }
 
     private fun ensureChoreographerScheduled() {
-        if (refCount > 0 && listeners.isNotEmpty() && !isChoreographerScheduled) {
+        if (listeners.isNotEmpty() && !isChoreographerScheduled) {
             val schedule = {
-                if (refCount > 0 && listeners.isNotEmpty() && !isChoreographerScheduled) {
+                if (listeners.isNotEmpty() && !isChoreographerScheduled) {
                     isChoreographerScheduled = true
                     lastFpsTime = 0L
                     frameCount = 0

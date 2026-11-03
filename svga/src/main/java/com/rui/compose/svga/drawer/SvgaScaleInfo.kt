@@ -27,11 +27,12 @@ class SvgaScaleInfo {
         videoHeight: Float,
         scaleType: ImageView.ScaleType
     ) {
-        if (canvasWidth == 0.0f || canvasHeight == 0.0f || videoWidth == 0.0f || videoHeight == 0.0f) {
+        resetVar()
+        if (!canvasWidth.isFinite() || !canvasHeight.isFinite() || !videoWidth.isFinite() || !videoHeight.isFinite() ||
+            canvasWidth <= 0.0f || canvasHeight <= 0.0f || videoWidth <= 0.0f || videoHeight <= 0.0f) {
             return
         }
 
-        resetVar()
         val canWVidWF = (canvasWidth - videoWidth) / 2.0f
         val canHVidHF = (canvasHeight - videoHeight) / 2.0f
 

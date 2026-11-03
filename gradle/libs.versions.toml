@@ -6,7 +6,7 @@ composeBom = "2025.12.01"
 activityCompose = "1.12.2"
 appcompat = "1.7.1"
 lifecycleRuntimeKtx = "2.10.0"
-wireRuntime = "5.4.0"
+wireRuntime = "7.1.2"
 coil = "2.7.0"
 okio = "3.16.4"
 leakcanary = "2.14"
@@ -43,3 +43,4 @@ android-application = { id = "com.android.application", version.ref = "agp" }
 android-library = { id = "com.android.library", version.ref = "agp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+wire = { id = "com.squareup.wire", version.ref = "wireRuntime" }

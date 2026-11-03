@@ -11,8 +11,10 @@ class SvgaVideoSpriteEntity {
     val frames: List<SvgaVideoSpriteFrameEntity>
 
     constructor(obj: JSONObject) {
-        this.imageKey = obj.optString("imageKey")
-        this.matteKey = obj.optString("matteKey")
+        val rawImageKey = obj.optString("imageKey")
+        this.imageKey = if (rawImageKey.isNotEmpty()) rawImageKey else null
+        val rawMatteKey = obj.optString("matteKey")
+        this.matteKey = if (rawMatteKey.isNotEmpty()) rawMatteKey else null
         val mutableFrames = mutableListOf<SvgaVideoSpriteFrameEntity>()
         obj.optJSONArray("frames")?.let { arr ->
             for (i in 0 until arr.length()) {
@@ -37,8 +39,8 @@ class SvgaVideoSpriteEntity {
     }
 
     constructor(obj: SpriteEntity) {
-        this.imageKey = obj.imageKey
-        this.matteKey = obj.matteKey
+        this.imageKey = if (obj.imageKey.isNotEmpty()) obj.imageKey else null
+        this.matteKey = if (obj.matteKey.isNotEmpty()) obj.matteKey else null
         var lastFrame: SvgaVideoSpriteFrameEntity? = null
         frames = obj.frames.mapNotNull { frameProto ->
             try {

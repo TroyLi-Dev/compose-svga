@@ -7,6 +7,7 @@ import android.os.Build
 import com.rui.compose.svga.entity.SvgaVideoEntity
 import com.rui.compose.svga.utils.log.LogUtils
 import java.io.FileDescriptor
+import java.lang.ref.WeakReference
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -17,7 +18,7 @@ object SvgaSoundManager {
     private const val TAG = "SvgaSoundManager"
 
     private var soundPool: SoundPool? = null
-    private val soundCallbackMap = ConcurrentHashMap<Int, SvgaSoundCallback>()
+    private val soundCallbackMap = ConcurrentHashMap<Int, WeakReference<SvgaSoundCallback>>()
     private var volume: Float = 1f
 
     fun init(maxStreams: Int = 20) {
@@ -26,7 +27,7 @@ object SvgaSoundManager {
         soundPool = createSoundPool(maxStreams).apply {
             setOnLoadCompleteListener { _, soundId, status ->
                 LogUtils.debug(TAG, "SoundPool onLoadComplete soundId=$soundId status=$status")
-                soundCallbackMap[soundId]?.onComplete()
+                soundCallbackMap[soundId]?.get()?.onComplete()
             }
         }
     }
@@ -34,7 +35,10 @@ object SvgaSoundManager {
     fun release() {
         LogUtils.debug(TAG, "release")
         soundCallbackMap.clear()
-        soundPool?.release()
+        try {
+            soundPool?.setOnLoadCompleteListener(null)
+            soundPool?.release()
+        } catch (_: Throwable) {}
         soundPool = null
     }
 
@@ -44,13 +48,17 @@ object SvgaSoundManager {
 
         if (entity == null) {
             this.volume = clamped
-            soundCallbackMap.values.forEach { it.onVolumeChange(clamped) }
+            soundCallbackMap.values.forEach { it.get()?.onVolumeChange(clamped) }
             return
         }
 
         val pool = soundPool ?: return
         entity.audioList.forEach { audio ->
-            audio.playID?.let { pool.setVolume(it, clamped, clamped) }
+            audio.playID?.let {
+                try {
+                    pool.setVolume(it, clamped, clamped)
+                } catch (_: Throwable) {}
+            }
         }
     }
 
@@ -84,10 +92,17 @@ object SvgaSoundManager {
         path: String,
         priority: Int = 1
     ): Int {
-        if (!checkInit()) return -1
-        val soundId = soundPool!!.load(path, priority)
-        if (callback != null) soundCallbackMap[soundId] = callback
-        return soundId
+        val pool = soundPool ?: return -1
+        return try {
+            val soundId = pool.load(path, priority)
+            if (callback != null && soundId > 0) {
+                soundCallbackMap[soundId] = WeakReference(callback)
+            }
+            soundId
+        } catch (t: Throwable) {
+            LogUtils.error(TAG, "SoundPool load failed for $path", t)
+            -1
+        }
     }
 
     internal fun load(
@@ -97,35 +112,64 @@ object SvgaSoundManager {
         length: Long,
         priority: Int = 1
     ): Int {
-        if (!checkInit()) return -1
-        val soundId = soundPool!!.load(fd, offset, length, priority)
-        if (callback != null) soundCallbackMap[soundId] = callback
-        return soundId
+        val pool = soundPool ?: return -1
+        return try {
+            val soundId = pool.load(fd, offset, length, priority)
+            if (callback != null && soundId > 0) {
+                soundCallbackMap[soundId] = WeakReference(callback)
+            }
+            soundId
+        } catch (t: Throwable) {
+            LogUtils.error(TAG, "SoundPool load fd failed", t)
+            -1
+        }
     }
 
     internal fun unload(soundId: Int) {
-        if (!checkInit()) return
-        soundPool!!.unload(soundId)
+        val pool = soundPool ?: return
+        try {
+            pool.unload(soundId)
+        } catch (t: Throwable) {
+            LogUtils.error(TAG, "SoundPool unload failed for soundId=$soundId", t)
+        }
         soundCallbackMap.remove(soundId)
     }
 
     internal fun play(soundId: Int, playVolume: Float = volume): Int {
-        if (!checkInit()) return -1
-        return soundPool!!.play(soundId, playVolume, playVolume, 1, 0, 1.0f)
+        val pool = soundPool ?: return -1
+        val vol = if (playVolume.isFinite()) playVolume.coerceIn(0f, 1f) else 0f
+        return try {
+            pool.play(soundId, vol, vol, 1, 0, 1.0f)
+        } catch (t: Throwable) {
+            LogUtils.error(TAG, "SoundPool play failed for soundId=$soundId", t)
+            -1
+        }
     }
 
     internal fun stop(soundId: Int) {
-        if (!checkInit()) return
-        soundPool!!.stop(soundId)
+        val pool = soundPool ?: return
+        try {
+            pool.stop(soundId)
+        } catch (t: Throwable) {
+            LogUtils.error(TAG, "SoundPool stop failed for soundId=$soundId", t)
+        }
     }
 
     internal fun resume(soundId: Int) {
-        if (!checkInit()) return
-        soundPool!!.resume(soundId)
+        val pool = soundPool ?: return
+        try {
+            pool.resume(soundId)
+        } catch (t: Throwable) {
+            LogUtils.error(TAG, "SoundPool resume failed for soundId=$soundId", t)
+        }
     }
 
     internal fun pause(soundId: Int) {
-        if (!checkInit()) return
-        soundPool!!.pause(soundId)
+        val pool = soundPool ?: return
+        try {
+            pool.pause(soundId)
+        } catch (t: Throwable) {
+            LogUtils.error(TAG, "SoundPool pause failed for soundId=$soundId", t)
+        }
     }
 }

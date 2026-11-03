@@ -1,7 +1,6 @@
 package com.rui.compose.svga.entity
 
 import android.graphics.Path
-import com.rui.compose.svga.utils.SvgaPoint
 import java.util.StringTokenizer
 
 class SvgaPathEntity(originValue: String) {
@@ -10,8 +9,14 @@ class SvgaPathEntity(originValue: String) {
         private const val VALID_METHODS = "MLHVCSQRAZmlhvcsqraz"
     }
 
-    private val replacedValue: String =
-        if (originValue.contains(",")) originValue.replace(",", " ") else originValue
+    private val replacedValue: String = run {
+        var str = originValue
+        if (str.contains(",")) str = str.replace(",", " ")
+        if (str.contains("-")) {
+            str = str.replace(Regex("(?<![eE\\sMLHVCSQRAZmlhvcsqraz])\\-"), " -")
+        }
+        str
+    }
 
     @Volatile
     private var cachedPath: Path? = null
@@ -52,86 +57,150 @@ class SvgaPathEntity(originValue: String) {
         }
     }
 
-    private fun operate(finalPath: Path, method: String, args: StringTokenizer, context: PathContext) {
-        var x0 = 0.0f
-        var y0 = 0.0f
-        var x1 = 0.0f
-        var y1 = 0.0f
-        var x2 = 0.0f
-        var y2 = 0.0f
+    private fun safeFloat(s: String): Float {
+        val f = s.toFloatOrNull() ?: 0f
+        return if (f.isFinite()) f else 0f
+    }
 
+    private fun operate(finalPath: Path, method: String, args: StringTokenizer, context: PathContext) {
+        val tokens = ArrayList<Float>()
         try {
-            var index = 0
             while (args.hasMoreTokens()) {
                 val s = args.nextToken()
                 if (s.isEmpty()) continue
-                if (index == 0) x0 = s.toFloat()
-                if (index == 1) y0 = s.toFloat()
-                if (index == 2) x1 = s.toFloat()
-                if (index == 3) y1 = s.toFloat()
-                if (index == 4) x2 = s.toFloat()
-                if (index == 5) y2 = s.toFloat()
-                index++
+                tokens.add(safeFloat(s))
             }
-        } catch (_: Exception) {
-        }
+        } catch (_: Throwable) {}
+
+        var i = 0
+        val size = tokens.size
 
         when (method) {
             "M" -> {
-                finalPath.moveTo(x0, y0)
-                context.currentX = x0
-                context.currentY = y0
+                if (i + 1 < size) {
+                    val x = tokens[i++]
+                    val y = tokens[i++]
+                    finalPath.moveTo(x, y)
+                    context.currentX = x
+                    context.currentY = y
+                }
+                while (i + 1 < size) {
+                    val x = tokens[i++]
+                    val y = tokens[i++]
+                    finalPath.lineTo(x, y)
+                    context.currentX = x
+                    context.currentY = y
+                }
             }
             "m" -> {
-                finalPath.rMoveTo(x0, y0)
-                context.currentX += x0
-                context.currentY += y0
+                if (i + 1 < size) {
+                    val x = tokens[i++]
+                    val y = tokens[i++]
+                    finalPath.rMoveTo(x, y)
+                    context.currentX += x
+                    context.currentY += y
+                }
+                while (i + 1 < size) {
+                    val x = tokens[i++]
+                    val y = tokens[i++]
+                    finalPath.rLineTo(x, y)
+                    context.currentX += x
+                    context.currentY += y
+                }
             }
             "L" -> {
-                finalPath.lineTo(x0, y0)
-                context.currentX = x0
-                context.currentY = y0
+                while (i + 1 < size) {
+                    val x = tokens[i++]
+                    val y = tokens[i++]
+                    finalPath.lineTo(x, y)
+                    context.currentX = x
+                    context.currentY = y
+                }
             }
             "l" -> {
-                finalPath.rLineTo(x0, y0)
-                context.currentX += x0
-                context.currentY += y0
-            }
-            "C" -> {
-                finalPath.cubicTo(x0, y0, x1, y1, x2, y2)
-                context.currentX = x2
-                context.currentY = y2
-            }
-            "c" -> {
-                finalPath.rCubicTo(x0, y0, x1, y1, x2, y2)
-                context.currentX += x2
-                context.currentY += y2
-            }
-            "Q" -> {
-                finalPath.quadTo(x0, y0, x1, y1)
-                context.currentX = x1
-                context.currentY = y1
-            }
-            "q" -> {
-                finalPath.rQuadTo(x0, y0, x1, y1)
-                context.currentX += x1
-                context.currentY += y1
+                while (i + 1 < size) {
+                    val x = tokens[i++]
+                    val y = tokens[i++]
+                    finalPath.rLineTo(x, y)
+                    context.currentX += x
+                    context.currentY += y
+                }
             }
             "H" -> {
-                finalPath.lineTo(x0, context.currentY)
-                context.currentX = x0
+                while (i < size) {
+                    val x = tokens[i++]
+                    finalPath.lineTo(x, context.currentY)
+                    context.currentX = x
+                }
             }
             "h" -> {
-                finalPath.rLineTo(x0, 0f)
-                context.currentX += x0
+                while (i < size) {
+                    val x = tokens[i++]
+                    finalPath.rLineTo(x, 0f)
+                    context.currentX += x
+                }
             }
             "V" -> {
-                finalPath.lineTo(context.currentX, x0)
-                context.currentY = x0
+                while (i < size) {
+                    val y = tokens[i++]
+                    finalPath.lineTo(context.currentX, y)
+                    context.currentY = y
+                }
             }
             "v" -> {
-                finalPath.rLineTo(0f, x0)
-                context.currentY += x0
+                while (i < size) {
+                    val y = tokens[i++]
+                    finalPath.rLineTo(0f, y)
+                    context.currentY += y
+                }
+            }
+            "C" -> {
+                while (i + 5 < size) {
+                    val x0 = tokens[i++]
+                    val y0 = tokens[i++]
+                    val x1 = tokens[i++]
+                    val y1 = tokens[i++]
+                    val x2 = tokens[i++]
+                    val y2 = tokens[i++]
+                    finalPath.cubicTo(x0, y0, x1, y1, x2, y2)
+                    context.currentX = x2
+                    context.currentY = y2
+                }
+            }
+            "c" -> {
+                while (i + 5 < size) {
+                    val x0 = tokens[i++]
+                    val y0 = tokens[i++]
+                    val x1 = tokens[i++]
+                    val y1 = tokens[i++]
+                    val x2 = tokens[i++]
+                    val y2 = tokens[i++]
+                    finalPath.rCubicTo(x0, y0, x1, y1, x2, y2)
+                    context.currentX += x2
+                    context.currentY += y2
+                }
+            }
+            "Q" -> {
+                while (i + 3 < size) {
+                    val x0 = tokens[i++]
+                    val y0 = tokens[i++]
+                    val x1 = tokens[i++]
+                    val y1 = tokens[i++]
+                    finalPath.quadTo(x0, y0, x1, y1)
+                    context.currentX = x1
+                    context.currentY = y1
+                }
+            }
+            "q" -> {
+                while (i + 3 < size) {
+                    val x0 = tokens[i++]
+                    val y0 = tokens[i++]
+                    val x1 = tokens[i++]
+                    val y1 = tokens[i++]
+                    finalPath.rQuadTo(x0, y0, x1, y1)
+                    context.currentX += x1
+                    context.currentY += y1
+                }
             }
             "Z", "z" -> {
                 finalPath.close()

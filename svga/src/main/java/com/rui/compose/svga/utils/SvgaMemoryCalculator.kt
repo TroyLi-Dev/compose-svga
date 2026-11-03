@@ -51,11 +51,13 @@ class SvgaMemoryCalculator private constructor() {
         fun getAvailableMemoryBytes(): Long {
             var availableMem = -1L
             activityManager?.let {
-                val memoryInfo = ActivityManager.MemoryInfo()
-                it.getMemoryInfo(memoryInfo)
-                if (memoryInfo.totalMem > VALID_MIN_MEMORY_SIZE) {
-                    availableMem = memoryInfo.availMem
-                }
+                try {
+                    val memoryInfo = ActivityManager.MemoryInfo()
+                    it.getMemoryInfo(memoryInfo)
+                    if (memoryInfo.totalMem > VALID_MIN_MEMORY_SIZE) {
+                        availableMem = memoryInfo.availMem
+                    }
+                } catch (_: Throwable) {}
             }
             return availableMem
         }
@@ -63,7 +65,8 @@ class SvgaMemoryCalculator private constructor() {
         @JvmStatic
         fun hasAvailableMemoryGb(context: Context?, gb: Long): Boolean {
             if (activityManager == null && context != null) {
-                activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+                val appCtx = context.applicationContext ?: context
+                activityManager = appCtx.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
             }
             return getAvailableMemoryBytes() >= gb * 1024L * 1024L * 1024L
         }
@@ -116,14 +119,15 @@ class SvgaMemoryCalculator private constructor() {
 
     fun queryDeviceTotalRam(context: Context): Long {
         if (deviceTotalMemory > 0L) return deviceTotalMemory
-        val sp = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val appCtx = context.applicationContext ?: context
+        val sp = appCtx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val cached = sp.getLong(TOTAL_MEMORY_KEY, 0L)
         if (cached > 0L) {
             deviceTotalMemory = cached
             isLowMemoryDevice = deviceTotalMemory <= lowMemoryThreshold
             return deviceTotalMemory
         }
-        val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+        val am = appCtx.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
         val memoryInfo = ActivityManager.MemoryInfo()
         am?.getMemoryInfo(memoryInfo)
         if (memoryInfo.totalMem > VALID_MIN_MEMORY_SIZE) {

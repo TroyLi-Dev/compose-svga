@@ -56,11 +56,7 @@ dependencies {
 
     // 原生 UI 组件
     implementation(libs.androidx.recyclerview)
-
-    implementation(libs.androidx.compose.material.icons.core)
-    implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.coil.compose)
-    implementation("androidx.navigation:navigation-compose:2.7.7")
 
     testImplementation(libs.junit)
     debugImplementation(libs.leakcanary.android)

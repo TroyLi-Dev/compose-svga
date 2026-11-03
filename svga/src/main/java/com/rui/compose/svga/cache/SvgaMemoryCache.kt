@@ -10,7 +10,14 @@ class SvgaMemoryCache private constructor() {
 
     companion object {
         const val TAG = "SvgaMemoryCache"
-        private const val DEFAULT_MAX_SIZE = 64 * 1024 * 1024 // 64MB
+        
+        /**
+         * 动态基于可用堆内存的 1/8 计算缓存上限（下限 16MB，上限 64MB），防止低端机 OOM
+         */
+        private val DEFAULT_MAX_SIZE: Int by lazy {
+            val maxMemory = Runtime.getRuntime().maxMemory()
+            (maxMemory / 8).coerceIn(16L * 1024 * 1024, 64L * 1024 * 1024).toInt()
+        }
 
         val instance by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { SvgaMemoryCache() }
     }
@@ -18,6 +25,12 @@ class SvgaMemoryCache private constructor() {
     private val cache = object : LruCache<String, SvgaVideoEntity>(DEFAULT_MAX_SIZE) {
         override fun sizeOf(key: String, value: SvgaVideoEntity): Int {
             return getImageSize(value)
+        }
+    }
+
+    fun setMaxSize(maxBytes: Int) {
+        if (maxBytes > 0) {
+            cache.resize(maxBytes)
         }
     }
 

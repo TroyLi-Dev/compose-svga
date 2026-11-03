@@ -89,7 +89,8 @@ object SvgaDiskCache {
         val audioDir = File(getCacheDir(), "audios").apply {
             if (!exists()) mkdirs()
         }
-        return File(audioDir, "$audioKey.mp3")
+        val safeKey = buildCacheKey(audioKey)
+        return File(audioDir, "$safeKey.mp3")
     }
 
     fun isCached(cacheKey: String): Boolean {
@@ -97,8 +98,31 @@ object SvgaDiskCache {
         return dir.exists() && !dir.listFiles().isNullOrEmpty()
     }
 
+    /**
+     * 自动淘汰超限的磁盘缓存（默认上限 256MB，淘汰至 75%）
+     */
+    fun trimDiskCache(maxBytes: Long = 256 * 1024 * 1024L) {
+        try {
+            val root = getCacheDir()
+            if (!root.exists() || !root.isDirectory) return
+            val dirs = root.listFiles()?.filter { it.isDirectory } ?: return
+            var totalSize = dirs.sumOf { dir -> dir.walkTopDown().filter { it.isFile }.sumOf { it.length() } }
+            if (totalSize <= maxBytes) return
+
+            val sortedDirs = dirs.sortedBy { it.lastModified() }
+            val targetSize = (maxBytes * 0.75).toLong()
+            for (dir in sortedDirs) {
+                val dirSize = dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+                dir.deleteRecursively()
+                totalSize -= dirSize
+                if (totalSize <= targetSize) break
+            }
+        } catch (_: Throwable) {}
+    }
+
     fun clearAll() {
-        cacheDir?.deleteRecursively()
-        cacheDir?.mkdirs()
+        val dir = getCacheDir()
+        dir.deleteRecursively()
+        dir.mkdirs()
     }
 }

@@ -1,22 +1,13 @@
 package com.rui.compose.svga.parser
 
-import com.rui.compose.svga.parser.fetcher.AssetFetcher
-import com.rui.compose.svga.parser.fetcher.FileFetcher
-import com.rui.compose.svga.parser.fetcher.HttpUrlFetcher
-import com.rui.compose.svga.parser.fetcher.RawResFetcher
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
- * 资源获取器责任链注册中心（Chain of Responsibility Pattern）
+ * 资源获取器插件注册中心（Strategy Pattern）
  */
 object SvgaFetcherRegistry {
 
-    private val fetchers = CopyOnWriteArrayList<SvgaResourceFetcher<*>>().apply {
-        add(FileFetcher())
-        add(HttpUrlFetcher())
-        add(RawResFetcher())
-        add(AssetFetcher()) // Asset 作为兜底探测
-    }
+    private val fetchers = CopyOnWriteArrayList<SvgaResourceFetcher<*>>()
 
     fun register(fetcher: SvgaResourceFetcher<*>, priorityFirst: Boolean = true) {
         if (priorityFirst) {
@@ -24,6 +15,14 @@ object SvgaFetcherRegistry {
         } else {
             fetchers.add(fetcher)
         }
+    }
+
+    fun unregister(fetcher: SvgaResourceFetcher<*>) {
+        fetchers.remove(fetcher)
+    }
+
+    fun clear() {
+        fetchers.clear()
     }
 
     @Suppress("UNCHECKED_CAST")

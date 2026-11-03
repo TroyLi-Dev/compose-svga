@@ -97,4 +97,24 @@ class SvgaRedesignUnitTest {
         val hasMem = com.rui.compose.svga.utils.SvgaMemoryCalculator.hasSufficientMemory(100 * 1024 * 1024L)
         assertTrue(hasMem)
     }
+
+    @Test
+    fun testCustomFetcherPluginRegistration() {
+        data class CustomModel(val secretPayload: String)
+        val testFetcher = object : com.rui.compose.svga.parser.SvgaResourceFetcher<CustomModel> {
+            override fun handles(data: Any): Boolean = data is CustomModel
+            override suspend fun fetch(context: android.content.Context, data: CustomModel): com.rui.compose.svga.parser.SvgaFetchResult {
+                val dummyStream = java.io.ByteArrayInputStream(ByteArray(0))
+                return com.rui.compose.svga.parser.SvgaFetchResult.Stream(dummyStream, "custom_secret_key")
+            }
+        }
+
+        com.rui.compose.svga.parser.SvgaFetcherRegistry.clear()
+        com.rui.compose.svga.parser.SvgaFetcherRegistry.register(testFetcher)
+        val matched = com.rui.compose.svga.parser.SvgaFetcherRegistry.findFetcher(CustomModel("cipher"))
+        assertTrue(matched != null)
+        com.rui.compose.svga.parser.SvgaFetcherRegistry.unregister(testFetcher)
+        val afterUnregister = com.rui.compose.svga.parser.SvgaFetcherRegistry.findFetcher(CustomModel("cipher"))
+        assertTrue(afterUnregister == null)
+    }
 }
