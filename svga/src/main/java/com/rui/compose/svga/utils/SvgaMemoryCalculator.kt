@@ -2,6 +2,7 @@ package com.rui.compose.svga.utils
 
 import android.app.ActivityManager
 import android.content.Context
+import androidx.core.content.edit
 import com.rui.compose.svga.utils.log.LogUtils
 
 /**
@@ -111,7 +112,7 @@ class SvgaMemoryCalculator private constructor() {
         if (memoryInfo.totalMem > VALID_MIN_MEMORY_SIZE) {
             deviceTotalMemory = memoryInfo.totalMem
             isLowMemoryDevice = deviceTotalMemory <= lowMemoryThreshold
-            sp.edit().putLong(TOTAL_MEMORY_KEY, deviceTotalMemory).apply()
+            sp.edit { putLong(TOTAL_MEMORY_KEY, deviceTotalMemory) }
         }
         return deviceTotalMemory
     }

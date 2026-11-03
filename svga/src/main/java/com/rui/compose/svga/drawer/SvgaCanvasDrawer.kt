@@ -1,4 +1,8 @@
+@file:Suppress("UseKtx")
+
 package com.rui.compose.svga.drawer
+
+import android.annotation.SuppressLint
 
 import android.graphics.Bitmap
 import android.graphics.BitmapShader
@@ -358,6 +362,7 @@ class SvgaCanvasDrawer(
                         it.maxLines
                     } else {
                         try {
+                            @SuppressLint("PrivateApi")
                             val field = StaticLayout::class.java.getDeclaredField("mMaximumVisibleLineCount")
                             field.isAccessible = true
                             field.getInt(it)

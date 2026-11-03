@@ -32,13 +32,13 @@ import java.util.zip.ZipInputStream
  * SVGA 核心解码与解析器
  */
 class SvgaParser(
-    private val context: Context?,
+    context: Context?,
     val needCutBitmap: Boolean = false
 ) {
+    private val context: Context? = context?.applicationContext ?: context
 
     init {
-        context?.let { ctx ->
-            val appCtx = ctx.applicationContext ?: ctx
+        this.context?.let { appCtx ->
             SvgaDiskCache.init(appCtx)
             com.rui.compose.svga.utils.SvgaMemoryCalculator.instance.init(appCtx)
         }
