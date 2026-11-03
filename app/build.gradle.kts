@@ -7,10 +7,11 @@ plugins {
 }
 android {
     namespace = "com.rui.compose.svga.app"
-    compileSdk = 36
+    compileSdk = libs.versions.compileSdk.get().toInt()
     defaultConfig {
         applicationId = "com.rui.compose.svga"
-        minSdk = 24
+        minSdk = libs.versions.appMinSdk.get().toInt()
+        targetSdk = libs.versions.targetSdk.get().toInt()
         versionCode = 1
         versionName = "1.0"
 
