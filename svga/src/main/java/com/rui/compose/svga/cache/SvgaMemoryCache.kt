@@ -47,14 +47,17 @@ class SvgaMemoryCache private constructor() {
     }
 
     fun put(key: String, entity: SvgaVideoEntity) {
+        if (key.isEmpty()) return
         cache.put(key, entity)
     }
 
     fun get(key: String): SvgaVideoEntity? {
+        if (key.isEmpty()) return null
         return cache.get(key)
     }
 
     fun remove(cacheKey: String) {
+        if (cacheKey.isEmpty()) return
         cache.remove(cacheKey)
     }
 

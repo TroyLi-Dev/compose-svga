@@ -95,8 +95,13 @@ open class SvgaImageView @JvmOverloads constructor(
     /**
      * 智能异步加载并播放资源（支持 URL、本地绝对路径、Assets 路径、File 对象、Raw 资源）
      */
-    fun load(source: Any, onComplete: ((SvgaVideoEntity) -> Unit)? = null) {
+    fun load(source: Any?, onComplete: ((SvgaVideoEntity) -> Unit)? = null) {
         currentParseCancelTask?.invoke()
+        currentParseCancelTask = null
+        if (source == null) {
+            clear()
+            return
+        }
         val cacheKey = com.rui.compose.svga.cache.SvgaDiskCache.buildCacheKeyForModel(source)
         val cached = com.rui.compose.svga.cache.SvgaMemoryCache.instance.get(cacheKey)
         if (cached != null) {

@@ -57,7 +57,8 @@ object SvgaDiskCache {
     /**
      * 针对任意类型的资源输入（URL, File, Int rawres, Assets string 等）计算全工程统一的缓存键
      */
-    fun buildCacheKeyForModel(model: Any): String {
+    fun buildCacheKeyForModel(model: Any?): String {
+        if (model == null) return ""
         return when (model) {
             is URL -> buildCacheKey(model.toString())
             is File -> buildCacheKey("file://${model.absolutePath}")
@@ -94,6 +95,7 @@ object SvgaDiskCache {
     }
 
     fun isCached(cacheKey: String): Boolean {
+        if (cacheKey.isEmpty()) return false
         val dir = File(getCacheDir(), cacheKey)
         return dir.exists() && !dir.listFiles().isNullOrEmpty()
     }

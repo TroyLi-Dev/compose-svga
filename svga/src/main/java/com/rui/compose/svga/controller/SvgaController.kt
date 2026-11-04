@@ -165,6 +165,19 @@ class SvgaController(
     }
 
     /**
+     * 清理当前绑定的动画实体与状态（重置为 Idle）
+     */
+    fun clear() {
+        model = null
+        videoEntity = null
+        loadState = SvgaLoadState.Idle
+        playState = SvgaPlayState.Idle
+        currentFrame = 0
+        seekFrameTarget = 0
+        commandTrigger++
+    }
+
+    /**
      * 强制触发当前帧画布重绘（常用于暂停状态下动态修改文本或位图后的画面即时刷新）
      */
     fun requestRedraw() {

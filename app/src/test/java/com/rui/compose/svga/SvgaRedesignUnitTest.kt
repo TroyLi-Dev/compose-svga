@@ -425,4 +425,25 @@ class SvgaRedesignUnitTest {
         assertEquals(100, area[2])
         assertEquals(150, area[3])
     }
+
+    @Test
+    fun testNullModelHandling() {
+        val key = SvgaDiskCache.buildCacheKeyForModel(null)
+        assertEquals("", key)
+        assertTrue(!SvgaDiskCache.isCached(""))
+        assertNull(com.rui.compose.svga.cache.SvgaMemoryCache.instance.get(""))
+    }
+
+    @Test
+    fun testControllerClear() {
+        val controller = com.rui.compose.svga.controller.SvgaController(initialModel = "sample.svga")
+        controller.play()
+        controller.clear()
+
+        assertNull(controller.model)
+        assertNull(controller.videoEntity)
+        assertEquals(com.rui.compose.svga.model.SvgaLoadState.Idle, controller.loadState)
+        assertEquals(com.rui.compose.svga.model.SvgaPlayState.Idle, controller.playState)
+        assertEquals(0, controller.currentFrame)
+    }
 }

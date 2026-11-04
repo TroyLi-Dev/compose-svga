@@ -104,6 +104,7 @@ fun SvgaAnimation(
 ) {
     if (model == null) {
         controller?.loadState = SvgaLoadState.Idle
+        controller?.videoEntity = null
         Box(modifier = modifier)
         return
     }

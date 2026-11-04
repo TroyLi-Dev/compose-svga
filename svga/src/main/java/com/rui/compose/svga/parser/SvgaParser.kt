@@ -104,9 +104,15 @@ class SvgaParser(
      * 智能自适应解码入口，支持 URL、File、Assets、RawRes 以及绝对路径
      */
     fun decodeAuto(
-        model: Any,
+        model: Any?,
         callback: ParseCompletion?
     ): (() -> Unit)? {
+        if (model == null) {
+            Handler(Looper.getMainLooper()).post {
+                callback?.onError(IllegalArgumentException("Model cannot be null"), "")
+            }
+            return null
+        }
         when (model) {
             is File -> {
                 decodeFromFile(model, callback)
