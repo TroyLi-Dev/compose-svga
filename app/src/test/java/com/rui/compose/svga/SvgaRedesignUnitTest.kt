@@ -2,6 +2,7 @@ package com.rui.compose.svga
 
 import com.rui.compose.svga.cache.SvgaDiskCache
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -489,5 +490,41 @@ class SvgaRedesignUnitTest {
         } finally {
             tempDir.deleteRecursively()
         }
+    }
+
+    @Test
+    fun testSvgaDrawablePublicFrameAndClearedProperties() {
+        val movieEntity = com.rui.compose.svga.proto.MovieEntity()
+        val videoEntity = com.rui.compose.svga.entity.SvgaVideoEntity(movieEntity, java.io.File("/tmp"))
+        val drawable = com.rui.compose.svga.view.SvgaDrawable(videoEntity)
+
+        assertTrue(drawable.cleared)
+        drawable.cleared = false
+        assertFalse(drawable.cleared)
+
+        assertEquals(0, drawable.currentFrame)
+        drawable.currentFrame = 12
+        assertEquals(12, drawable.currentFrame)
+    }
+
+    @Test
+    fun testSvgaDynamicEntityMultiListeners() {
+        val dynamic = com.rui.compose.svga.drawer.SvgaDynamicEntity()
+        var count1 = 0
+        var count2 = 0
+        val listener1: () -> Unit = { count1++ }
+        val listener2: () -> Unit = { count2++ }
+
+        dynamic.addOnDynamicChangedListener(listener1)
+        dynamic.addOnDynamicChangedListener(listener2)
+
+        dynamic.setDynamicText("hello", android.text.TextPaint(), "key1")
+        assertEquals(1, count1)
+        assertEquals(1, count2)
+
+        dynamic.removeOnDynamicChangedListener(listener1)
+        dynamic.setDynamicText("world", android.text.TextPaint(), "key1")
+        assertEquals(1, count1) // 未再次递增
+        assertEquals(2, count2) // 正常递增
     }
 }

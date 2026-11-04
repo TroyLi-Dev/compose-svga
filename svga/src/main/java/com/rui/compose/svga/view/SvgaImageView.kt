@@ -53,14 +53,19 @@ open class SvgaImageView @JvmOverloads constructor(
     private var animator: ValueAnimator? = null
     private var currentParseCancelTask: (() -> Unit)? = null
     private var itemClickAreaListener: SvgaItemClickListener? = null
+    private var currentLoadToken = 0L
+    private var isUserPaused = false
+    private var downKey: String? = null
 
     private val animatorListener = SvgaAnimatorListener(this)
     private val animatorUpdateListener = SvgaAnimatorUpdateListener(this)
 
     init {
-        val appCtx = context.applicationContext ?: context
-        com.rui.compose.svga.cache.SvgaDiskCache.init(appCtx)
-        com.rui.compose.svga.utils.SvgaMemoryCalculator.instance.init(appCtx)
+        if (!isInEditMode) {
+            val appCtx = context.applicationContext ?: context
+            com.rui.compose.svga.cache.SvgaDiskCache.init(appCtx)
+            com.rui.compose.svga.utils.SvgaMemoryCalculator.instance.init(appCtx)
+        }
         attrs?.let { loadAttrs(it) }
     }
 
@@ -84,8 +89,10 @@ open class SvgaImageView @JvmOverloads constructor(
                 2 -> fillMode = SvgaFillMode.Clear
             }
 
-            typedArray.getString(R.styleable.SvgaImageView_source)?.let { source ->
-                load(source)
+            if (!isInEditMode) {
+                typedArray.getString(R.styleable.SvgaImageView_source)?.let { source ->
+                    load(source)
+                }
             }
         } finally {
             typedArray.recycle()
@@ -96,6 +103,18 @@ open class SvgaImageView @JvmOverloads constructor(
      * 智能异步加载并播放资源（支持 URL、本地绝对路径、Assets 路径、File 对象、Raw 资源）
      */
     fun load(source: Any?, onComplete: ((SvgaVideoEntity) -> Unit)? = null) {
+        load(source, onError = null, onComplete = onComplete)
+    }
+
+    /**
+     * 智能异步加载并播放资源（支持 URL、本地绝对路径、Assets 路径、File 对象、Raw 资源）
+     */
+    fun load(
+        source: Any?,
+        onError: ((Exception) -> Unit)? = null,
+        onComplete: ((SvgaVideoEntity) -> Unit)? = null
+    ) {
+        val loadToken = ++currentLoadToken
         currentParseCancelTask?.invoke()
         currentParseCancelTask = null
         if (source == null) {
@@ -117,6 +136,7 @@ open class SvgaImageView @JvmOverloads constructor(
         val cancelTask = parser.decodeAuto(source, object : SvgaParser.ParseCompletion {
             override fun onComplete(videoItem: SvgaVideoEntity) {
                 post {
+                    if (currentLoadToken != loadToken) return@post
                     videoItem.antiAlias = antiAlias
                     setVideoItem(videoItem)
                     onComplete?.invoke(videoItem)
@@ -127,7 +147,11 @@ open class SvgaImageView @JvmOverloads constructor(
             }
 
             override fun onError(e: Exception, alias: String) {
-                LogUtils.error(TAG, "Load SVGA failed for: $source", e)
+                post {
+                    if (currentLoadToken != loadToken) return@post
+                    LogUtils.error(TAG, "Load SVGA failed for: $source", e)
+                    onError?.invoke(e)
+                }
             }
         })
         currentParseCancelTask = cancelTask
@@ -169,6 +193,7 @@ open class SvgaImageView @JvmOverloads constructor(
     }
 
     fun startAnimation(range: SvgaRange?, reverse: Boolean = false) {
+        isUserPaused = false
         stopAnimation(false)
         val drawable = getSvgaDrawable() ?: return
         drawable.cleared = false
@@ -198,6 +223,7 @@ open class SvgaImageView @JvmOverloads constructor(
     }
 
     fun pauseAnimation() {
+        isUserPaused = true
         if (animator?.isRunning == true) {
             animator?.pause()
             getSvgaDrawable()?.pause()
@@ -210,6 +236,7 @@ open class SvgaImageView @JvmOverloads constructor(
     }
 
     fun resumeAnimation() {
+        isUserPaused = false
         if (animator?.isPaused == true) {
             animator?.resume()
             getSvgaDrawable()?.resume()
@@ -224,6 +251,7 @@ open class SvgaImageView @JvmOverloads constructor(
     }
 
     fun stopAnimation(clear: Boolean) {
+        isUserPaused = false
         animator?.apply {
             removeListener(animatorListener)
             removeUpdateListener(animatorUpdateListener)
@@ -243,6 +271,8 @@ open class SvgaImageView @JvmOverloads constructor(
         val targetFrame = frame.coerceIn(0, max(0, drawable.videoEntity.frames - 1))
         drawable.cleared = false
         drawable.currentFrame = targetFrame
+        drawable.invalidateSelf()
+        invalidate()
         if (andPlay) {
             startAnimation()
             animator?.let { anim ->
@@ -288,23 +318,49 @@ open class SvgaImageView @JvmOverloads constructor(
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent?): Boolean {
-        if (event?.action != MotionEvent.ACTION_DOWN) {
-            return super.onTouchEvent(event)
-        }
-        val drawable = getSvgaDrawable() ?: return super.onTouchEvent(event)
-        for ((key, value) in drawable.dynamicEntity.clickMap) {
-            val minX = kotlin.math.min(value[0], value[2])
-            val maxX = kotlin.math.max(value[0], value[2])
-            val minY = kotlin.math.min(value[1], value[3])
-            val maxY = kotlin.math.max(value[1], value[3])
-            if (event.x >= minX && event.x <= maxX && event.y >= minY && event.y <= maxY) {
-                itemClickAreaListener?.let {
-                    it.onClick(key)
-                    return true
+        val ev = event ?: return super.onTouchEvent(event)
+        val listener = itemClickAreaListener ?: return super.onTouchEvent(ev)
+        val drawable = getSvgaDrawable() ?: return super.onTouchEvent(ev)
+
+        val localX = ev.x - drawable.bounds.left
+        val localY = ev.y - drawable.bounds.top
+
+        when (ev.action) {
+            MotionEvent.ACTION_DOWN -> {
+                downKey = null
+                for ((key, value) in drawable.dynamicEntity.clickMap) {
+                    val minX = kotlin.math.min(value[0], value[2])
+                    val maxX = kotlin.math.max(value[0], value[2])
+                    val minY = kotlin.math.min(value[1], value[3])
+                    val maxY = kotlin.math.max(value[1], value[3])
+                    if (localX >= minX && localX <= maxX && localY >= minY && localY <= maxY) {
+                        downKey = key
+                        return true
+                    }
                 }
             }
+            MotionEvent.ACTION_UP -> {
+                val targetKey = downKey
+                downKey = null
+                if (targetKey != null) {
+                    val value = drawable.dynamicEntity.clickMap[targetKey]
+                    if (value != null) {
+                        val minX = kotlin.math.min(value[0], value[2])
+                        val maxX = kotlin.math.max(value[0], value[2])
+                        val minY = kotlin.math.min(value[1], value[3])
+                        val maxY = kotlin.math.max(value[1], value[3])
+                        if (localX >= minX && localX <= maxX && localY >= minY && localY <= maxY) {
+                            listener.onClick(targetKey)
+                            return true
+                        }
+                    }
+                }
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                downKey = null
+            }
         }
-        return super.onTouchEvent(event)
+        return super.onTouchEvent(ev)
     }
 
     private var wasAnimatingBeforeHide = false
@@ -312,7 +368,7 @@ open class SvgaImageView @JvmOverloads constructor(
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
-        if ((autoPlay || wasAnimatingBeforeDetach) && getSvgaDrawable() != null && !isAnimating) {
+        if (!isUserPaused && (autoPlay || wasAnimatingBeforeDetach) && getSvgaDrawable() != null && !isAnimating) {
             wasAnimatingBeforeDetach = false
             startAnimation()
         }

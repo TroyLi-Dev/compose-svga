@@ -25,14 +25,14 @@ open class SvgaDrawable(
     val dynamicItem: SvgaDynamicEntity get() = dynamicEntity
 
     var cleared = true
-        internal set(value) {
+        set(value) {
             if (field == value) return
             field = value
             invalidateSelf()
         }
 
     var currentFrame = 0
-        internal set(value) {
+        set(value) {
             if (field == value) return
             field = value
             invalidateSelf()
