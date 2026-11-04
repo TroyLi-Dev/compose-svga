@@ -10,6 +10,8 @@ import com.rui.compose.svga.entity.SvgaVideoEntity
 import com.rui.compose.svga.exception.DecodeReason
 import com.rui.compose.svga.exception.SvgaException
 import com.rui.compose.svga.utils.log.LogUtils
+import okio.buffer
+import okio.source
 import org.json.JSONObject
 import java.io.BufferedInputStream
 import java.io.ByteArrayInputStream
@@ -583,7 +585,9 @@ class SvgaParser(
                     cacheDir.setLastModified(System.currentTimeMillis())
                 } catch (_: Throwable) {}
                 val movieEntity = try {
-                    MovieEntity.ADAPTER.decode(binaryFile.readBytes())
+                    binaryFile.source().buffer().use { source ->
+                        MovieEntity.ADAPTER.decode(source)
+                    }
                 } catch (e: Exception) {
                     throw SvgaException.DecodeException(
                         cacheDir.name,

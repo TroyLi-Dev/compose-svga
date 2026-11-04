@@ -100,7 +100,8 @@ object SvgaDiskCache {
     fun isCached(cacheKey: String): Boolean {
         if (cacheKey.isEmpty()) return false
         val dir = File(getCacheDir(), cacheKey)
-        return dir.exists() && !dir.listFiles().isNullOrEmpty()
+        if (!dir.exists() || !dir.isDirectory) return false
+        return File(dir, "movie.binary").exists() || File(dir, "movie.spec").exists()
     }
 
     /**
