@@ -118,42 +118,20 @@ open class SvgaDrawable(
     override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
 
     fun resume() {
-        videoEntity.audioList.forEach { audio ->
-            audio.playID?.let {
-                try {
-                    if (SvgaSoundManager.isInit()) SvgaSoundManager.resume(it)
-                    else videoEntity.soundPool?.resume(it)
-                } catch (_: Throwable) {}
-            }
-        }
+        drawer.resumeAudio()
     }
 
     fun pause() {
-        videoEntity.audioList.forEach { audio ->
-            audio.playID?.let {
-                try {
-                    if (SvgaSoundManager.isInit()) SvgaSoundManager.pause(it)
-                    else videoEntity.soundPool?.pause(it)
-                } catch (_: Throwable) {}
-            }
-        }
+        drawer.pauseAudio()
     }
 
     fun stop() {
-        videoEntity.audioList.forEach { audio ->
-            audio.playID?.let {
-                try {
-                    if (SvgaSoundManager.isInit()) SvgaSoundManager.stop(it)
-                    else videoEntity.soundPool?.stop(it)
-                } catch (_: Throwable) {}
-            }
-            audio.playID = null
-        }
+        drawer.stopAudio()
     }
 
     fun clear() {
-        stop()
         cleared = true
+        drawer.stopAudio()
         drawer.clear()
     }
 }

@@ -69,7 +69,9 @@ class SvgaParser(
             TimeUnit.SECONDS,
             LinkedBlockingQueue<Runnable>(),
             { r -> Thread(r, "SvgaParser-Thread-${threadNum.getAndIncrement()}") }
-        )
+        ).apply {
+            allowCoreThreadTimeOut(true)
+        }
 
         // 在途网络下载请求合并表 (SingleFlight In-Flight Merging)，彻底消灭重复网络请求与并发资源竞争
         private class InFlightUrlTask(
@@ -161,7 +163,7 @@ class SvgaParser(
                         val inputStream = appContext.resources.openRawResource(model)
                         decodeFromInputStream(inputStream, cacheKey, callback, true, null, model.toString())
                     } catch (e: Exception) {
-                        callback?.onError(e, model.toString())
+                        Handler(Looper.getMainLooper()).post { callback?.onError(e, model.toString()) }
                     }
                     return null
                 }
@@ -180,7 +182,9 @@ class SvgaParser(
                     }
                     return null
                 }
-                callback?.onError(IllegalArgumentException("Unsupported SVGA model type: ${model.javaClass.name}"), model.toString())
+                Handler(Looper.getMainLooper()).post {
+                    callback?.onError(IllegalArgumentException("Unsupported SVGA model type: ${model.javaClass.name}"), model.toString())
+                }
                 return null
             }
         }

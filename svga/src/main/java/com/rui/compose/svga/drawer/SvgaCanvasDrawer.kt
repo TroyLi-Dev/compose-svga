@@ -51,6 +51,10 @@ class SvgaCanvasDrawer(
     ) {
         super.drawFrame(canvas, frameIndex, scaleType, overrideWidth, overrideHeight)
 
+        if (dynamicItem.dynamicClickArea.isNotEmpty()) {
+            dynamicItem.clickMap.clear()
+        }
+
         playAudio(frameIndex)
         val sprites = requestFrameSprites(frameIndex)
         if (sprites.isEmpty()) return
@@ -143,19 +147,56 @@ class SvgaCanvasDrawer(
 
     private var lastAudioFrame = -1
 
+    private val activeStreamIds = HashMap<com.rui.compose.svga.entity.SvgaAudioEntity, Int>()
+    var volume: Float = 1.0f
+
+    fun setAudioVolume(vol: Float) {
+        val clamped = if (vol.isFinite()) vol.coerceIn(0f, 1f) else 0f
+        this.volume = clamped
+        activeStreamIds.values.forEach { streamId ->
+            try {
+                if (SvgaSoundManager.isInit()) {
+                    SvgaSoundManager.setStreamVolume(streamId, clamped)
+                } else {
+                    this.videoItem.soundPool?.setVolume(streamId, clamped, clamped)
+                }
+            } catch (_: Throwable) {}
+        }
+    }
+
+    fun pauseAudio() {
+        activeStreamIds.values.forEach { streamId ->
+            try {
+                if (SvgaSoundManager.isInit()) SvgaSoundManager.pause(streamId)
+                else this.videoItem.soundPool?.pause(streamId)
+            } catch (_: Throwable) {}
+        }
+    }
+
+    fun resumeAudio() {
+        activeStreamIds.values.forEach { streamId ->
+            try {
+                if (SvgaSoundManager.isInit()) SvgaSoundManager.resume(streamId)
+                else this.videoItem.soundPool?.resume(streamId)
+            } catch (_: Throwable) {}
+        }
+    }
+
+    fun stopAudio() {
+        activeStreamIds.values.forEach { streamId ->
+            try {
+                if (SvgaSoundManager.isInit()) SvgaSoundManager.stop(streamId)
+                else this.videoItem.soundPool?.stop(streamId)
+            } catch (_: Throwable) {}
+        }
+        activeStreamIds.clear()
+    }
+
     private fun playAudio(frameIndex: Int) {
         if (this.videoItem.audioList.isEmpty()) return
         // 动画倒带、循环或重播时，强制停播上一轮遗留的音频流
         if (frameIndex < lastAudioFrame) {
-            this.videoItem.audioList.forEach { audio ->
-                audio.playID?.let {
-                    try {
-                        if (SvgaSoundManager.isInit()) SvgaSoundManager.stop(it)
-                        else this.videoItem.soundPool?.stop(it)
-                    } catch (_: Throwable) {}
-                }
-                audio.playID = null
-            }
+            stopAudio()
             lastAudioFrame = -1
         }
 
@@ -169,16 +210,17 @@ class SvgaCanvasDrawer(
                 audio.startFrame in (previousFrame + 1)..frameIndex && frameIndex < audio.endFrame
             }
             if (shouldStart) {
-                val currentVol = if (this.videoItem.volume.isFinite()) this.videoItem.volume.coerceIn(0f, 1f) else 0f
+                val currentVol = if (this.volume.isFinite()) this.volume.coerceIn(0f, 1f) else 0f
                 if (currentVol >= 0f) {
                     audio.soundID?.let { soundID ->
-                        audio.playID?.let { oldId ->
+                        val oldStreamId = activeStreamIds.remove(audio)
+                        if (oldStreamId != null) {
                             try {
-                                if (SvgaSoundManager.isInit()) SvgaSoundManager.stop(oldId)
-                                else this.videoItem.soundPool?.stop(oldId)
+                                if (SvgaSoundManager.isInit()) SvgaSoundManager.stop(oldStreamId)
+                                else this.videoItem.soundPool?.stop(oldStreamId)
                             } catch (_: Throwable) {}
                         }
-                        audio.playID = try {
+                        val streamId = try {
                             if (SvgaSoundManager.isInit()) {
                                 SvgaSoundManager.play(soundID, currentVol)
                             } else {
@@ -188,17 +230,21 @@ class SvgaCanvasDrawer(
                             com.rui.compose.svga.utils.log.LogUtils.error("SvgaCanvasDrawer", "playAudio failed", t)
                             null
                         }
+                        if (streamId != null && streamId > 0) {
+                            activeStreamIds[audio] = streamId
+                            audio.playID = streamId // 向下兼容外部直接读取
+                        }
                     }
                 }
             }
             if (audio.endFrame <= frameIndex) {
-                audio.playID?.let {
+                val streamId = activeStreamIds.remove(audio)
+                if (streamId != null) {
                     try {
-                        if (SvgaSoundManager.isInit()) SvgaSoundManager.stop(it)
-                        else this.videoItem.soundPool?.stop(it)
+                        if (SvgaSoundManager.isInit()) SvgaSoundManager.stop(streamId)
+                        else this.videoItem.soundPool?.stop(streamId)
                     } catch (_: Throwable) {}
                 }
-                audio.playID = null
             }
         }
     }
@@ -207,15 +253,7 @@ class SvgaCanvasDrawer(
         drawTextCache.values.forEach { if (!it.bitmap.isRecycled) it.bitmap.recycle() }
         drawTextCache.clear()
         sharedValues.release()
-        videoItem.audioList.forEach { audio ->
-            audio.playID?.let {
-                try {
-                    if (SvgaSoundManager.isInit()) SvgaSoundManager.stop(it)
-                    else videoItem.soundPool?.stop(it)
-                } catch (_: Throwable) {}
-            }
-            audio.playID = null
-        }
+        stopAudio()
     }
 
     private fun obtainFrameMatrix(transform: Matrix): Matrix {

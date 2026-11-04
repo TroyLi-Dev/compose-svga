@@ -142,6 +142,14 @@ object SvgaSoundManager {
         soundCallbackMap.remove(soundId)
     }
 
+    internal fun setStreamVolume(streamId: Int, vol: Float) {
+        val pool = soundPool ?: return
+        val clamped = if (vol.isFinite()) vol.coerceIn(0f, 1f) else 0f
+        try {
+            pool.setVolume(streamId, clamped, clamped)
+        } catch (_: Throwable) {}
+    }
+
     internal fun play(soundId: Int, playVolume: Float = volume): Int {
         val pool = soundPool ?: return -1
         val vol = if (playVolume.isFinite()) playVolume.coerceIn(0f, 1f) else 0f

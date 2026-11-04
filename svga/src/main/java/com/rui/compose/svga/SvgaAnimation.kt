@@ -234,63 +234,32 @@ fun SvgaAnimation(
         }
     }
 
-    // 音频播放生命周期控制：暂停或置于后台时暂停音频，前台继续播放时恢复
-    LaunchedEffect(videoEntity, isStop, isStarted) {
-        val entity = videoEntity ?: return@LaunchedEffect
-        val shouldPauseAudio = isStop || !isStarted
-        if (shouldPauseAudio) {
-            entity.audioList.forEach { audio ->
-                audio.playID?.let { id ->
-                    if (SvgaSoundManager.isInit()) SvgaSoundManager.pause(id)
-                    else entity.soundPool?.pause(id)
-                }
-            }
-        } else {
-            entity.audioList.forEach { audio ->
-                audio.playID?.let { id ->
-                    if (SvgaSoundManager.isInit()) SvgaSoundManager.resume(id)
-                    else entity.soundPool?.resume(id)
-                }
-            }
-        }
-    }
-
-    // 真正离开组件或切换动画实体时，才彻底停播释放音频流
-    DisposableEffect(videoEntity) {
-        val entity = videoEntity ?: return@DisposableEffect onDispose {}
-        onDispose {
-            entity.audioList.forEach { audio ->
-                audio.playID?.let { id ->
-                    try {
-                        if (SvgaSoundManager.isInit()) SvgaSoundManager.stop(id)
-                        else entity.soundPool?.stop(id)
-                    } catch (_: Throwable) {}
-                }
-                audio.playID = null
-            }
-        }
-    }
-
-    LaunchedEffect(videoEntity, isMute) {
-        val entity = videoEntity ?: return@LaunchedEffect
-        val vol = if (isMute) 0.0f else 1.0f
-        entity.volume = vol
-        if (SvgaSoundManager.isInit()) {
-            SvgaSoundManager.setVolume(vol, entity)
-        } else {
-            entity.audioList.forEach { audio ->
-                audio.playID?.let { id ->
-                    try { entity.soundPool?.setVolume(id, vol, vol) } catch (_: Throwable) {}
-                }
-            }
-        }
-    }
-
     val drawer = remember(videoEntity, dynamicEntity) {
         videoEntity?.let { SvgaCanvasDrawer(it, dynamicEntity ?: SvgaDynamicEntity()) }
     }
+    // 离开组件或切换动画实体时，彻底停播当前实例的音频流并清理资源
     DisposableEffect(drawer) {
-        onDispose { drawer?.clear() }
+        onDispose {
+            drawer?.stopAudio()
+            drawer?.clear()
+        }
+    }
+
+    // 音频播放生命周期控制：暂停或置于后台时暂停音频，前台继续播放时恢复
+    LaunchedEffect(drawer, isStop, isStarted) {
+        val d = drawer ?: return@LaunchedEffect
+        val shouldPauseAudio = isStop || !isStarted
+        if (shouldPauseAudio) {
+            d.pauseAudio()
+        } else {
+            d.resumeAudio()
+        }
+    }
+
+    LaunchedEffect(drawer, isMute) {
+        val d = drawer ?: return@LaunchedEffect
+        val vol = if (isMute) 0.0f else 1.0f
+        d.setAudioVolume(vol)
     }
     val nativeScaleType = remember(contentScale) {
         when (contentScale) {

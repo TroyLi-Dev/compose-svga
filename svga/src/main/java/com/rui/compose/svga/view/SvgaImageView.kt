@@ -220,9 +220,9 @@ open class SvgaImageView @JvmOverloads constructor(
 
     fun stopAnimation(clear: Boolean) {
         animator?.apply {
+            removeListener(animatorListener)
+            removeUpdateListener(animatorUpdateListener)
             cancel()
-            removeAllListeners()
-            removeAllUpdateListeners()
         }
         animator = null
         isAnimating = false
@@ -397,10 +397,29 @@ open class SvgaImageView @JvmOverloads constructor(
 
     private class SvgaAnimatorListener(view: SvgaImageView) : Animator.AnimatorListener {
         private val ref = WeakReference(view)
-        override fun onAnimationRepeat(animation: Animator) { ref.get()?.callback?.onRepeat() }
-        override fun onAnimationEnd(animation: Animator) { ref.get()?.handleAnimationEnd() }
-        override fun onAnimationCancel(animation: Animator) { ref.get()?.isAnimating = false }
-        override fun onAnimationStart(animation: Animator) { ref.get()?.isAnimating = true }
+        private var isCanceled = false
+
+        override fun onAnimationStart(animation: Animator) {
+            isCanceled = false
+            ref.get()?.isAnimating = true
+        }
+
+        override fun onAnimationRepeat(animation: Animator) {
+            ref.get()?.callback?.onRepeat()
+        }
+
+        override fun onAnimationCancel(animation: Animator) {
+            isCanceled = true
+            ref.get()?.isAnimating = false
+        }
+
+        override fun onAnimationEnd(animation: Animator) {
+            val wasCanceled = isCanceled
+            isCanceled = false
+            if (!wasCanceled) {
+                ref.get()?.handleAnimationEnd()
+            }
+        }
     }
 
     private class SvgaAnimatorUpdateListener(view: SvgaImageView) : ValueAnimator.AnimatorUpdateListener {

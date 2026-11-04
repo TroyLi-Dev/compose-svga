@@ -407,4 +407,22 @@ class SvgaRedesignUnitTest {
         dynamic.clearDynamicObjects()
         assertEquals(4, changedCount)
     }
+
+    @Test
+    fun testDynamicClickAreaRegistration() {
+        val dynamic = com.rui.compose.svga.drawer.SvgaDynamicEntity()
+        dynamic.setClickArea("btn_gift")
+        assertTrue(dynamic.dynamicClickArea.containsKey("btn_gift"))
+
+        val listener = dynamic.dynamicClickArea["btn_gift"]
+        assertNotNull(listener)
+        listener?.onResponseArea("btn_gift", 10, 20, 100, 150)
+
+        val area = dynamic.clickMap["btn_gift"]
+        assertNotNull(area)
+        assertEquals(10, area!![0])
+        assertEquals(20, area[1])
+        assertEquals(100, area[2])
+        assertEquals(150, area[3])
+    }
 }
