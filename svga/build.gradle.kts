@@ -54,7 +54,7 @@ publishing {
         create<MavenPublication>("release") {
             groupId = "com.github.TroyLi-Dev"
             artifactId = "compose-svga"
-            version = project.findProperty("version")?.toString()?.takeIf { it != "unspecified" } ?: "1.0.1-rc01"
+            version = project.findProperty("version")?.toString()?.takeIf { it != "unspecified" } ?: "1.0.1-rc02"
             afterEvaluate {
                 from(components["release"])
             }

@@ -83,13 +83,13 @@ In your app module `build.gradle.kts`:
 
 ```kotlin
 dependencies {
-    implementation("com.github.TroyLi-Dev:compose-svga:1.0.1-rc01")
+    implementation("com.github.TroyLi-Dev:compose-svga:1.0.1-rc02")
 }
 ```
 
 > **Groovy DSL (`build.gradle`)**:
 > ```groovy
-> implementation 'com.github.TroyLi-Dev:compose-svga:1.0.1-rc01'
+> implementation 'com.github.TroyLi-Dev:compose-svga:1.0.1-rc02'
 > ```
 
 ---

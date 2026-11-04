@@ -83,13 +83,13 @@ dependencyResolutionManagement {
 
 ```kotlin
 dependencies {
-    implementation("com.github.TroyLi-Dev:compose-svga:1.0.1-rc01")
+    implementation("com.github.TroyLi-Dev:compose-svga:1.0.1-rc02")
 }
 ```
 
 > **提示**：如果使用 Groovy DSL (`build.gradle`)：
 > ```groovy
-> implementation 'com.github.TroyLi-Dev:compose-svga:1.0.1-rc01'
+> implementation 'com.github.TroyLi-Dev:compose-svga:1.0.1-rc02'
 > ```
 
 ---
