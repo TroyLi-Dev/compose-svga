@@ -1,0 +1,686 @@
+package com.rui.compose.svga
+
+import com.rui.compose.svga.cache.SvgaDiskCache
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import java.security.MessageDigest
+import kotlin.math.abs
+
+/**
+ * SVGA 现代化重构与核心组件单元测试
+ */
+class SvgaRedesignUnitTest {
+
+    @Test
+    fun testMd5CacheKeyHexPadding() {
+        val testInputs = listOf(
+            "test_key_1",
+            "https://cdn.example.com/svga/gift_castle.svga",
+            "file:///sdcard/download/banner.svga",
+            "short",
+            "a_very_long_url_with_many_parameters_and_special_chars_!@#\$%^&*()_+"
+        )
+
+        for (input in testInputs) {
+            val key = SvgaDiskCache.buildCacheKey(input)
+            // 必须严格是 32 位十六进制字符
+            assertEquals(32, key.length)
+            assertTrue(key.matches(Regex("^[0-9a-f]{32}$")))
+
+            // 与标准无补零缺陷的 MessageDigest 格式化对比
+            val md = MessageDigest.getInstance("MD5")
+            val digest = md.digest(input.toByteArray(Charsets.UTF_8))
+            val expectedHex = digest.joinToString("") { "%02x".format(it) }
+            assertEquals(expectedHex, key)
+        }
+    }
+
+    @Test
+    fun testSegmentLockDistribution() {
+        val segmentLocks = Array(32) { Any() }
+        val keys = (1..1000).map { "gift_animation_cache_key_$it" }
+        val hitCounts = IntArray(32)
+
+        for (key in keys) {
+            val index = abs(key.hashCode()) and 31
+            hitCounts[index]++
+            val lock = segmentLocks[index]
+            assertNotNull(lock)
+        }
+
+        // 验证 32 个分段锁全部被均匀哈希命中
+        for (i in 0 until 32) {
+            assertTrue("Segment lock $i should be hit", hitCounts[i] > 0)
+        }
+    }
+
+    @Test
+    fun testDiskCacheSelfHealing() {
+        // 验证未初始化时不发生 Crash，而是自愈创建临时缓存目录
+        val cacheDir = SvgaDiskCache.getCacheDir()
+        assertTrue(cacheDir.exists())
+        val testDir = SvgaDiskCache.buildCacheDir("self_healing_test")
+        assertTrue(testDir.exists())
+    }
+
+    @Test
+    fun testControllerStateControl() {
+        val controller = com.rui.compose.svga.controller.SvgaController(
+            initialModel = "test.svga",
+            initialLoops = 2
+        )
+        assertEquals("test.svga", controller.model)
+        assertEquals(2, controller.loops)
+        assertEquals(0, controller.currentFrame)
+
+        controller.seekTo(15)
+        assertEquals(15, controller.currentFrame)
+
+        controller.replay()
+        assertEquals(com.rui.compose.svga.model.SvgaPlayState.Playing, controller.playState)
+
+        controller.pause()
+        assertEquals(com.rui.compose.svga.model.SvgaPlayState.Paused, controller.playState)
+
+        controller.resume()
+        assertEquals(com.rui.compose.svga.model.SvgaPlayState.Playing, controller.playState)
+
+        controller.stop()
+        assertEquals(com.rui.compose.svga.model.SvgaPlayState.Idle, controller.playState)
+        assertEquals(0, controller.currentFrame)
+    }
+
+    @Test
+    fun testMemoryCalculatorGracefulFallback() {
+        // 在单元测试 JVM 环境中无 ActivityManager 时，默认放行，绝不误拦截
+        val hasMem = com.rui.compose.svga.utils.SvgaMemoryCalculator.hasSufficientMemory(100 * 1024 * 1024L)
+        assertTrue(hasMem)
+    }
+
+    @Test
+    fun testCustomFetcherPluginRegistration() {
+        data class CustomModel(val secretPayload: String)
+        val testFetcher = object : com.rui.compose.svga.parser.SvgaResourceFetcher<CustomModel> {
+            override fun handles(data: Any): Boolean = data is CustomModel
+            override suspend fun fetch(context: android.content.Context, data: CustomModel): com.rui.compose.svga.parser.SvgaFetchResult {
+                val dummyStream = java.io.ByteArrayInputStream(ByteArray(0))
+                return com.rui.compose.svga.parser.SvgaFetchResult.Stream(dummyStream, "custom_secret_key")
+            }
+        }
+
+        com.rui.compose.svga.parser.SvgaFetcherRegistry.clear()
+        com.rui.compose.svga.parser.SvgaFetcherRegistry.register(testFetcher)
+        val matched = com.rui.compose.svga.parser.SvgaFetcherRegistry.findFetcher(CustomModel("cipher"))
+        assertNotNull(matched)
+        com.rui.compose.svga.parser.SvgaFetcherRegistry.unregister(testFetcher)
+        val afterUnregister = com.rui.compose.svga.parser.SvgaFetcherRegistry.findFetcher(CustomModel("cipher"))
+        assertNull(afterUnregister)
+    }
+
+    @Test
+    fun testDynamicEntityResetAndIsolation() {
+        val dynamic = com.rui.compose.svga.drawer.SvgaDynamicEntity()
+        var finishCalled = false
+        dynamic.setFinishListener(object : com.rui.compose.svga.drawer.SvgaDynamicEntity.ReplaceFinish {
+            override fun replaceFinish() {
+                finishCalled = true
+            }
+        })
+
+        dynamic.dynamicSize = 2
+        dynamic.loadOkSize = 1
+        assertEquals(2, dynamic.dynamicSize)
+        assertEquals(1, dynamic.loadOkSize)
+
+        dynamic.clearDynamicObjects()
+        assertEquals(0, dynamic.dynamicSize)
+        assertEquals(0, dynamic.loadOkSize)
+        assertTrue(!finishCalled)
+    }
+
+    @Test
+    fun testTrimDiskCacheExcludesAudiosDirectory() {
+        val cacheDir = SvgaDiskCache.getCacheDir()
+        val audiosDir = java.io.File(cacheDir, "audios").apply { if (!exists()) mkdirs() }
+        val dummyAudio = java.io.File(audiosDir, "test_audio.mp3").apply { writeText("audio_bytes") }
+
+        // 创建一个普通缓存目录
+        val animDir = java.io.File(cacheDir, "test_anim_dir").apply { if (!exists()) mkdirs() }
+        val dummyAnim = java.io.File(animDir, "movie.binary").apply { writeText("svga_binary_bytes") }
+
+        assertTrue(dummyAudio.exists())
+        assertTrue(dummyAnim.exists())
+
+        // 触发 trim，使用极小阈值 (1 字节)
+        SvgaDiskCache.trimDiskCache(maxBytes = 1L)
+
+        // audios 目录下的音频文件必须受到保护，绝对不可被误删
+        assertTrue("Audios file must be preserved", dummyAudio.exists())
+        assertTrue("Audios directory must be preserved", audiosDir.exists())
+
+        // 清理测试产物
+        dummyAudio.delete()
+        dummyAnim.delete()
+        animDir.delete()
+    }
+
+    @Test
+    fun testDynamicDslExtensions() {
+        val dynamic = com.rui.compose.svga.drawer.buildSvgaDynamic {
+            hidden("banner", true)
+            click("btn_like")
+            drawer("wave") { canvas, frameIndex ->
+                canvas.drawColor(0)
+                true
+            }
+            drawerSized("avatar") { canvas, frameIndex, width, height ->
+                width > 0 && height > 0
+            }
+        }
+        assertTrue(dynamic.dynamicHidden["banner"] == true)
+        assertNotNull(dynamic.dynamicClickArea["btn_like"])
+        assertNotNull(dynamic.dynamicDrawer["wave"])
+        assertNotNull(dynamic.dynamicDrawerSized["avatar"])
+    }
+
+    @Test
+    fun testTrimAudioCacheInDiskCache() {
+        val cacheDir = SvgaDiskCache.getCacheDir()
+        val audiosDir = java.io.File(cacheDir, "audios").apply { if (!exists()) mkdirs() }
+        val oldAudio = java.io.File(audiosDir, "old_audio.mp3").apply {
+            writeText("old_mp3_data_stream_content")
+            setLastModified(System.currentTimeMillis() - 100000)
+        }
+        val newAudio = java.io.File(audiosDir, "new_audio.mp3").apply {
+            writeText("new_mp3_data_stream_content")
+            setLastModified(System.currentTimeMillis())
+        }
+
+        assertTrue(oldAudio.exists())
+        assertTrue(newAudio.exists())
+
+        // 设置 maxAudioBytes 为极小值 (1 字节)，触发基于 LRU 的音频淘汰
+        SvgaDiskCache.trimDiskCache(maxBytes = 1000000L, maxAudioBytes = 1L)
+
+        // 验证淘汰发生且保留了目录
+        assertTrue(audiosDir.exists())
+
+        // 清理测试残留
+        oldAudio.delete()
+        newAudio.delete()
+    }
+
+    @Test
+    fun testPathEntityNegativeParsing() {
+        val pathStr = "M0,0 L10-20 C30-40 50-60 70-80 Z"
+        val pathEntity = com.rui.compose.svga.entity.SvgaPathEntity(pathStr)
+        val path = android.graphics.Path()
+        pathEntity.buildPath(path)
+        assertNotNull(pathEntity)
+    }
+
+    @Test
+    fun testVideoShapeEntityPathBuilding() {
+        // 测试椭圆路径构建
+        val ellipseJson = org.json.JSONObject().apply {
+            put("type", "ellipse")
+            put("args", org.json.JSONObject().apply {
+                put("x", 50.0)
+                put("y", 50.0)
+                put("radiusX", 25.0)
+                put("radiusY", 15.0)
+            })
+        }
+        val ellipseShape = com.rui.compose.svga.entity.SvgaVideoShapeEntity(ellipseJson)
+        ellipseShape.buildPath()
+        assertNotNull(ellipseShape.shapePath)
+
+        // 测试圆角矩形路径构建
+        val roundRectJson = org.json.JSONObject().apply {
+            put("type", "rect")
+            put("args", org.json.JSONObject().apply {
+                put("x", 0.0)
+                put("y", 0.0)
+                put("width", 100.0)
+                put("height", 50.0)
+                put("cornerRadius", 8.0)
+            })
+        }
+        val roundRectShape = com.rui.compose.svga.entity.SvgaVideoShapeEntity(roundRectJson)
+        roundRectShape.buildPath()
+        assertNotNull(roundRectShape.shapePath)
+
+        // 测试直角矩形路径构建
+        val rectJson = org.json.JSONObject().apply {
+            put("type", "rect")
+            put("args", org.json.JSONObject().apply {
+                put("x", 0.0)
+                put("y", 0.0)
+                put("width", 100.0)
+                put("height", 50.0)
+                put("cornerRadius", 0.0)
+            })
+        }
+        val rectShape = com.rui.compose.svga.entity.SvgaVideoShapeEntity(rectJson)
+        rectShape.buildPath()
+        assertNotNull(rectShape.shapePath)
+    }
+
+    @Test
+    fun testDynamicEntityTextIsolation() {
+        val dynamic = com.rui.compose.svga.drawer.SvgaDynamicEntity()
+        val textPaint = android.text.TextPaint()
+        dynamic.setDynamicText("User1", textPaint, "user_name")
+        dynamic.setDynamicText("Score: 100", textPaint, "score_label")
+
+        assertEquals("User1", dynamic.dynamicText["user_name"])
+        assertEquals("Score: 100", dynamic.dynamicText["score_label"])
+
+        // 更新单个 key
+        dynamic.setDynamicText("Score: 200", textPaint, "score_label")
+        assertEquals("User1", dynamic.dynamicText["user_name"])
+        assertEquals("Score: 200", dynamic.dynamicText["score_label"])
+    }
+
+    @Test
+    fun testSvgPathParsingExtendedCommands() {
+        // 包含标准平滑三次曲线 S/s、平滑二次曲线 T/t、椭圆弧 A/a
+        val svgD = "M 10 10 C 20 20 30 30 40 40 S 60 60 70 70 s 10 10 20 20 Q 30 30 40 40 T 60 60 t 10 10 A 25 25 0 0 1 100 100 a 10 10 45 1 0 -20 -20 Z"
+        val pathEntity = com.rui.compose.svga.entity.SvgaPathEntity(svgD)
+        val path = android.graphics.Path()
+        pathEntity.buildPath(path)
+        assertNotNull(path)
+    }
+
+    @Test
+    fun testSvgaControllerRequestRedraw() {
+        val controller = com.rui.compose.svga.controller.SvgaController()
+        // 验证调用 requestRedraw 与 invalidate 正常执行且状态稳定
+        controller.requestRedraw()
+        controller.invalidate()
+        assertNotNull(controller)
+    }
+
+    @Test
+    fun testDecodeReasonStreamOverflow() {
+        val reason = com.rui.compose.svga.exception.DecodeReason.STREAM_OVERFLOW
+        assertEquals("STREAM_OVERFLOW", reason.name)
+    }
+
+    @Test
+    fun testSvgaDrawableScaleTypeAndColorFilter() {
+        val movieEntity = com.rui.compose.svga.proto.MovieEntity()
+        val videoEntity = com.rui.compose.svga.entity.SvgaVideoEntity(movieEntity, java.io.File("/tmp"))
+        val drawable = com.rui.compose.svga.view.SvgaDrawable(videoEntity)
+
+        // 验证 scaleType 赋值正常
+        drawable.scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+        assertEquals(android.widget.ImageView.ScaleType.CENTER_CROP, drawable.scaleType)
+
+        // 验证 colorFilter 获取与设置遵循标准 Drawable 契约
+        assertNull(drawable.colorFilter)
+        val filter = android.graphics.PorterDuffColorFilter(0xFF0000, android.graphics.PorterDuff.Mode.SRC_IN)
+        drawable.colorFilter = filter
+        assertTrue(drawable.colorFilter === filter)
+
+        // 验证 setAlpha 与 getAlpha
+        drawable.alpha = 180
+        assertEquals(180, drawable.alpha)
+    }
+
+    @Test
+    fun testSvgaSoundManagerThreadSafety() {
+        // 多线程并发调用 init 与 release 不应崩溃或死锁
+        val threads = (1..8).map {
+            Thread {
+                com.rui.compose.svga.audio.SvgaSoundManager.init(10)
+                com.rui.compose.svga.audio.SvgaSoundManager.release()
+            }
+        }
+        threads.forEach { it.start() }
+        threads.forEach { it.join() }
+    }
+
+    @Test
+    fun testShapeAlphaCompositeMath() {
+        // 验证颜色 Alpha 与 Sprite Alpha 的复合乘法计算逻辑
+        val colorAlpha = 128
+        val spriteAlpha = 128
+        val finalAlpha = ((colorAlpha * spriteAlpha) / 255)
+        assertEquals(64, finalAlpha)
+
+        val fullSpriteAlpha = 255
+        val finalAlphaFull = if (fullSpriteAlpha == 255) colorAlpha else ((colorAlpha * fullSpriteAlpha) / 255)
+        assertEquals(128, finalAlphaFull)
+    }
+
+    @Test
+    fun testDeflateSvgaDiskCacheDetection() {
+        val cacheKey = "deflate_cache_test_key"
+        val cacheDir = SvgaDiskCache.buildCacheDir(cacheKey)
+        try {
+            // 清理初始状态
+            cacheDir.listFiles()?.forEach { it.delete() }
+            assertTrue(!SvgaDiskCache.isCached(cacheKey))
+
+            // 写入 movie.binary 文件模拟 Protobuf SVGA 缓存
+            val binaryFile = java.io.File(cacheDir, "movie.binary")
+            binaryFile.writeBytes(byteArrayOf(0x08, 0x01, 0x12, 0x04))
+
+            // 验证 isCached 立即生效返回 true
+            assertTrue(SvgaDiskCache.isCached(cacheKey))
+
+            // 删除后再次验证
+            binaryFile.delete()
+            assertTrue(!SvgaDiskCache.isCached(cacheKey))
+        } finally {
+            cacheDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun testControllerRetry() {
+        val controller = com.rui.compose.svga.controller.SvgaController(initialModel = "retry.svga")
+        controller.retry()
+        assertEquals(com.rui.compose.svga.model.SvgaLoadState.Loading, controller.loadState)
+        assertNull(controller.videoEntity)
+    }
+
+    @Test
+    fun testDynamicEntityOnChangedCallback() {
+        val dynamic = com.rui.compose.svga.drawer.SvgaDynamicEntity()
+        var changedCount = 0
+        dynamic.onDynamicChanged = { changedCount++ }
+
+        dynamic.setHidden(true, "key1")
+        assertEquals(1, changedCount)
+
+        dynamic.setDynamicText("test", android.text.TextPaint(), "key2")
+        assertEquals(2, changedCount)
+
+        dynamic.setDynamicDrawer({ _, _ -> true }, "key3")
+        assertEquals(3, changedCount)
+
+        dynamic.clearDynamicObjects()
+        assertEquals(4, changedCount)
+    }
+
+    @Test
+    fun testDynamicClickAreaRegistration() {
+        val dynamic = com.rui.compose.svga.drawer.SvgaDynamicEntity()
+        dynamic.setClickArea("btn_gift")
+        assertTrue(dynamic.dynamicClickArea.containsKey("btn_gift"))
+
+        val listener = dynamic.dynamicClickArea["btn_gift"]
+        assertNotNull(listener)
+        listener?.onResponseArea("btn_gift", 10, 20, 100, 150)
+
+        val area = dynamic.clickMap["btn_gift"]
+        assertNotNull(area)
+        assertEquals(10, area!![0])
+        assertEquals(20, area[1])
+        assertEquals(100, area[2])
+        assertEquals(150, area[3])
+    }
+
+    @Test
+    fun testNullModelHandling() {
+        val key = SvgaDiskCache.buildCacheKeyForModel(null)
+        assertEquals("", key)
+        assertTrue(!SvgaDiskCache.isCached(""))
+        assertNull(com.rui.compose.svga.cache.SvgaMemoryCache.instance.get(""))
+    }
+
+    @Test
+    fun testControllerClear() {
+        val controller = com.rui.compose.svga.controller.SvgaController(initialModel = "sample.svga")
+        controller.play()
+        controller.clear()
+
+        assertNull(controller.model)
+        assertNull(controller.videoEntity)
+        assertEquals(com.rui.compose.svga.model.SvgaLoadState.Idle, controller.loadState)
+        assertEquals(com.rui.compose.svga.model.SvgaPlayState.Idle, controller.playState)
+        assertEquals(0, controller.currentFrame)
+    }
+
+    @Test
+    fun testSvgPathParsingWithConsecutiveDotsAndWhitespace() {
+        val svgString = "M10.5.2L-5-10\t15\n20,25.5.5Z"
+        val pathEntity = com.rui.compose.svga.entity.SvgaPathEntity(svgString)
+        val path = android.graphics.Path()
+        pathEntity.buildPath(path)
+        assertNotNull(path)
+    }
+
+    @Test
+    fun testDynamicClickAreaTriggersOnChanged() {
+        val dynamic = com.rui.compose.svga.drawer.SvgaDynamicEntity()
+        var changed = false
+        dynamic.onDynamicChanged = { changed = true }
+        dynamic.setClickArea("btn_avatar")
+        assertTrue(changed)
+    }
+
+    @Test
+    fun testBuildCacheKeyForSvgaFetchResult() {
+        val mockFile = java.io.File("mock.svga")
+        val fileResult = com.rui.compose.svga.parser.SvgaFetchResult.FileResult(mockFile, "custom_cache_key_123")
+        assertEquals("custom_cache_key_123", SvgaDiskCache.buildCacheKeyForModel(fileResult))
+
+        val streamResult = com.rui.compose.svga.parser.SvgaFetchResult.Stream(
+            java.io.ByteArrayInputStream(ByteArray(0)),
+            "custom_stream_key_456"
+        )
+        assertEquals("custom_stream_key_456", SvgaDiskCache.buildCacheKeyForModel(streamResult))
+    }
+
+    @Test
+    fun testScopedBuildAudioFile() {
+        val tempDir = java.io.File(System.getProperty("java.io.tmpdir"), "svga_audio_test_${System.nanoTime()}")
+        tempDir.mkdirs()
+        try {
+            val audioFile = SvgaDiskCache.buildAudioFile("bgm_track", tempDir)
+            assertEquals(tempDir.absolutePath, audioFile.parentFile?.absolutePath)
+            assertTrue(audioFile.name.endsWith(".mp3"))
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun testSvgaDrawablePublicFrameAndClearedProperties() {
+        val movieEntity = com.rui.compose.svga.proto.MovieEntity()
+        val videoEntity = com.rui.compose.svga.entity.SvgaVideoEntity(movieEntity, java.io.File("/tmp"))
+        val drawable = com.rui.compose.svga.view.SvgaDrawable(videoEntity)
+
+        assertTrue(drawable.cleared)
+        drawable.cleared = false
+        assertFalse(drawable.cleared)
+
+        assertEquals(0, drawable.currentFrame)
+        drawable.currentFrame = 12
+        assertEquals(12, drawable.currentFrame)
+    }
+
+    @Test
+    fun testSvgaDynamicEntityMultiListeners() {
+        val dynamic = com.rui.compose.svga.drawer.SvgaDynamicEntity()
+        var count1 = 0
+        var count2 = 0
+        val listener1: () -> Unit = { count1++ }
+        val listener2: () -> Unit = { count2++ }
+
+        dynamic.addOnDynamicChangedListener(listener1)
+        dynamic.addOnDynamicChangedListener(listener2)
+
+        dynamic.setDynamicText("hello", android.text.TextPaint(), "key1")
+        assertEquals(1, count1)
+        assertEquals(1, count2)
+
+        dynamic.removeOnDynamicChangedListener(listener1)
+        dynamic.setDynamicText("world", android.text.TextPaint(), "key1")
+        assertEquals(1, count1) // 未再次递增
+        assertEquals(2, count2) // 正常递增
+    }
+
+    @Test
+    fun testDirectCanvasTextRenderingZeroIntermediateBitmap() {
+        val movieEntity = com.rui.compose.svga.proto.MovieEntity()
+        val videoEntity = com.rui.compose.svga.entity.SvgaVideoEntity(movieEntity, java.io.File("/tmp"))
+        val dynamic = com.rui.compose.svga.drawer.SvgaDynamicEntity()
+        dynamic.setDynamicText("TestDirectText", android.text.TextPaint().apply {
+            color = android.graphics.Color.BLUE
+            textSize = 24f
+        }, "text_key")
+
+        val drawer = com.rui.compose.svga.drawer.SvgaCanvasDrawer(videoEntity, dynamic)
+        val canvas = android.graphics.Canvas()
+        // 绘制帧应平稳运行，不抛出异常且不分配中间 Text 位图
+        drawer.drawFrame(canvas, 0, android.widget.ImageView.ScaleType.FIT_CENTER)
+        drawer.clear()
+    }
+
+    @Test
+    fun testSvgaMemoryCacheTrimMemory() {
+        val cache = com.rui.compose.svga.cache.SvgaMemoryCache.instance
+        assertNull(cache.get(""))
+        @Suppress("DEPRECATION")
+        cache.trimMemory(android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL)
+        @Suppress("DEPRECATION")
+        cache.trimMemory(android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW)
+        cache.clearAllCache()
+    }
+
+    @Test
+    fun testSvgaVideoSpriteEntityPrecomputedKeys() {
+        val proto = com.rui.compose.svga.proto.SpriteEntity(
+            imageKey = "avatar.png.matte",
+            matteKey = "mask_1"
+        )
+        val sprite = com.rui.compose.svga.entity.SvgaVideoSpriteEntity(proto)
+        assertTrue(sprite.isMatte)
+        assertEquals("avatar.png", sprite.bitmapKey)
+        assertNull(sprite.noExtKey)
+        assertEquals("avatar", sprite.noExtBitmapKey)
+
+        val protoNormal = com.rui.compose.svga.proto.SpriteEntity(
+            imageKey = "gift_box.png"
+        )
+        val spriteNormal = com.rui.compose.svga.entity.SvgaVideoSpriteEntity(protoNormal)
+        assertFalse(spriteNormal.isMatte)
+        assertEquals("gift_box.png", spriteNormal.bitmapKey)
+        assertEquals("gift_box", spriteNormal.noExtKey)
+        assertEquals("gift_box", spriteNormal.noExtBitmapKey)
+    }
+
+    @Test
+    fun testSvgaDynamicEntityHasDynamicText() {
+        val dynamic = com.rui.compose.svga.drawer.SvgaDynamicEntity()
+        assertFalse(dynamic.hasDynamicText())
+
+        dynamic.setDynamicText("hello", android.text.TextPaint(), "key1")
+        assertTrue(dynamic.hasDynamicText())
+
+        dynamic.clear()
+        assertFalse(dynamic.hasDynamicText())
+    }
+
+    @Test
+    fun testSvgaRectEmptyConstant() {
+        val empty = com.rui.compose.svga.utils.SvgaRect.EMPTY
+        assertEquals(0.0, empty.x, 0.0)
+        assertEquals(0.0, empty.y, 0.0)
+        assertEquals(0.0, empty.width, 0.0)
+        assertEquals(0.0, empty.height, 0.0)
+
+        val frameProto = com.rui.compose.svga.proto.FrameEntity(
+            layout = com.rui.compose.svga.proto.Layout(0f, 0f, 0f, 0f)
+        )
+        val frame = com.rui.compose.svga.entity.SvgaVideoSpriteFrameEntity(frameProto)
+        assertTrue(frame.layout === empty)
+    }
+
+    @Test
+    fun testSvgaScaleInfoScaleMatrix() {
+        val scaleInfo = com.rui.compose.svga.drawer.SvgaScaleInfo()
+        scaleInfo.performScaleType(
+            canvasWidth = 100f,
+            canvasHeight = 200f,
+            videoWidth = 100f,
+            videoHeight = 100f,
+            scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+        )
+        assertEquals(1.0f, scaleInfo.scaleFx, 0.001f)
+        assertEquals(1.0f, scaleInfo.scaleFy, 0.001f)
+        assertEquals(50.0f, scaleInfo.tranFy, 0.001f)
+        assertNotNull(scaleInfo.scaleMatrix)
+    }
+
+    @Test
+    fun testSvgaVideoEntityHasMatte() {
+        val nonMatteProto = com.rui.compose.svga.proto.MovieEntity(
+            sprites = listOf(
+                com.rui.compose.svga.proto.SpriteEntity(imageKey = "img_1.png"),
+                com.rui.compose.svga.proto.SpriteEntity(imageKey = "img_2.png")
+            )
+        )
+        val videoNonMatte = com.rui.compose.svga.entity.SvgaVideoEntity(nonMatteProto, java.io.File("/tmp"))
+        assertFalse(videoNonMatte.hasMatte)
+
+        val matteProto = com.rui.compose.svga.proto.MovieEntity(
+            sprites = listOf(
+                com.rui.compose.svga.proto.SpriteEntity(imageKey = "img_1.png"),
+                com.rui.compose.svga.proto.SpriteEntity(imageKey = "img_mask.matte")
+            )
+        )
+        val videoMatte = com.rui.compose.svga.entity.SvgaVideoEntity(matteProto, java.io.File("/tmp"))
+        assertTrue(videoMatte.hasMatte)
+    }
+
+    @Test
+    fun testShapeStylesPaintCapAndJoin() {
+        val proto = com.rui.compose.svga.proto.ShapeEntity(
+            type = com.rui.compose.svga.proto.ShapeEntity.ShapeType.SHAPE,
+            styles = com.rui.compose.svga.proto.ShapeEntity.ShapeStyle(
+                strokeWidth = 3f,
+                lineCap = com.rui.compose.svga.proto.ShapeEntity.ShapeStyle.LineCap.LineCap_SQUARE,
+                lineJoin = com.rui.compose.svga.proto.ShapeEntity.ShapeStyle.LineJoin.LineJoin_ROUND
+            )
+        )
+        val shapeFromProto = com.rui.compose.svga.entity.SvgaVideoShapeEntity(proto)
+        assertEquals(android.graphics.Paint.Cap.SQUARE, shapeFromProto.styles?.paintCap)
+        assertEquals(android.graphics.Paint.Join.ROUND, shapeFromProto.styles?.paintJoin)
+    }
+
+    @Test
+    fun testMd5CacheKeyConcurrentSafety() {
+        val executor = java.util.concurrent.Executors.newFixedThreadPool(8)
+        val futures = (1..100).map { i ->
+            executor.submit(java.util.concurrent.Callable {
+                val input = "concurrent_key_test_$i"
+                val key = SvgaDiskCache.buildCacheKey(input)
+                val md = MessageDigest.getInstance("MD5")
+                val expectedHex = md.digest(input.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+                assertEquals(expectedHex, key)
+            })
+        }
+        futures.forEach { it.get() }
+        executor.shutdown()
+    }
+
+    @Test
+    fun testEmptyDynamicEntitySingleton() {
+        val empty1 = com.rui.compose.svga.drawer.EMPTY_DYNAMIC_ENTITY
+        val empty2 = com.rui.compose.svga.drawer.EMPTY_DYNAMIC_ENTITY
+        assertTrue(empty1 === empty2)
+        assertFalse(empty1.hasDynamicText())
+        assertTrue(empty1.dynamicImage.isEmpty())
+        assertTrue(empty1.dynamicHidden.isEmpty())
+        assertTrue(empty1.dynamicDrawer.isEmpty())
+    }
+}

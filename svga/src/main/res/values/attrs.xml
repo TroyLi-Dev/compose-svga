@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <declare-styleable name="SVGAImageView">
+    <declare-styleable name="SvgaImageView">
         <attr name="source" format="string" />
         <attr name="autoPlay" format="boolean" />
         <attr name="antiAlias" format="boolean" />

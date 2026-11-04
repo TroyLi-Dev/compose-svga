@@ -6,11 +6,12 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 android {
-    namespace = "com.rui.composes.svga"
-    compileSdk = 36
+    namespace = "com.rui.compose.svga.app"
+    compileSdk = libs.versions.compileSdk.get().toInt()
     defaultConfig {
-        applicationId = "com.rui.composes.svga"
-        minSdk = 24
+        applicationId = "com.rui.compose.svga"
+        minSdk = libs.versions.appMinSdk.get().toInt()
+        targetSdk = libs.versions.targetSdk.get().toInt()
         versionCode = 1
         versionName = "1.0"
 
@@ -29,6 +30,10 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
+    }
+
+    testOptions {
+        unitTests.isReturnDefaultValues = true
     }
 
     buildFeatures {
@@ -56,11 +61,8 @@ dependencies {
 
     // 原生 UI 组件
     implementation(libs.androidx.recyclerview)
-
-    implementation(libs.androidx.compose.material.icons.core)
-    implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.coil.compose)
-    implementation("androidx.navigation:navigation-compose:2.7.7")
 
+    testImplementation(libs.junit)
     debugImplementation(libs.leakcanary.android)
 }

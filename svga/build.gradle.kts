@@ -4,14 +4,15 @@ plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.wire)
     id("maven-publish")
 }
 
 android {
-    namespace = "com.rui.composes.svga"
-    compileSdk = 36
+    namespace = "com.rui.compose.svga"
+    compileSdk = libs.versions.compileSdk.get().toInt()
     defaultConfig {
-        minSdk = 21
+        minSdk = libs.versions.minSdk.get().toInt()
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         consumerProguardFiles("consumer-rules.pro")
     }
@@ -29,6 +30,23 @@ android {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
+
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
+
+    publishing {
+        singleVariant("release")
+    }
+}
+
+wire {
+    sourcePath {
+        srcDir("src/main/proto")
+    }
+    kotlin {
+        android = true
+    }
 }
 
 publishing {
@@ -36,7 +54,7 @@ publishing {
         create<MavenPublication>("release") {
             groupId = "com.github.TroyLi-Dev"
             artifactId = "compose-svga"
-            version = project.version as String? ?: "unspecified"
+            version = project.findProperty("version")?.toString()?.takeIf { it != "unspecified" } ?: project.version.toString()
             afterEvaluate {
                 from(components["release"])
             }
@@ -56,6 +74,7 @@ dependencies {
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.foundation)
     implementation(libs.androidx.compose.runtime)
+    implementation(libs.androidx.lifecycle.runtime.compose)
 
     // SVGA 核心依赖
     implementation(libs.wire.runtime)
