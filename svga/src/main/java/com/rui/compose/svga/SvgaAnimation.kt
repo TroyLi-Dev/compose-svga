@@ -153,7 +153,19 @@ fun SvgaAnimation(
     }
     var redrawTrigger by remember(cacheKey) { mutableIntStateOf(0) }
 
-    LaunchedEffect(cacheKey) {
+    DisposableEffect(dynamicEntity) {
+        val dynamic = dynamicEntity ?: return@DisposableEffect onDispose {}
+        val prevListener = dynamic.onDynamicChanged
+        dynamic.onDynamicChanged = {
+            redrawTrigger++
+            prevListener?.invoke()
+        }
+        onDispose {
+            dynamic.onDynamicChanged = prevListener
+        }
+    }
+
+    LaunchedEffect(cacheKey, controller?.commandTrigger) {
         // 1. 若内存缓存已命中，直接完成复用
         val cached = SvgaMemoryCache.instance.get(cacheKey)
         if (cached != null) {

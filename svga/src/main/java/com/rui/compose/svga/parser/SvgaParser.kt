@@ -151,9 +151,14 @@ class SvgaParser(
             else -> {
                 val appContext = context
                 if (appContext != null && model is Int) {
+                    val cacheKey = SvgaDiskCache.buildCacheKey("rawres://$model")
+                    val cached = SvgaMemoryCache.instance.get(cacheKey)
+                    if (cached != null) {
+                        Handler(Looper.getMainLooper()).post { callback?.onComplete(cached) }
+                        return null
+                    }
                     try {
                         val inputStream = appContext.resources.openRawResource(model)
-                        val cacheKey = SvgaDiskCache.buildCacheKey("rawres://$model")
                         decodeFromInputStream(inputStream, cacheKey, callback, true, null, model.toString())
                     } catch (e: Exception) {
                         callback?.onError(e, model.toString())
@@ -197,10 +202,15 @@ class SvgaParser(
             cleanPath = cleanPath.substring(8)
         }
         cleanPath = cleanPath.removePrefix("/")
+        val cacheKey = SvgaDiskCache.buildCacheKey("assets://$cleanPath")
+        val cached = SvgaMemoryCache.instance.get(cacheKey)
+        if (cached != null) {
+            handler.post { callback?.onComplete(cached) }
+            return
+        }
         threadPoolExecutor.execute {
             try {
                 val inputStream = appContext.assets.open(cleanPath)
-                val cacheKey = SvgaDiskCache.buildCacheKey("assets://$cleanPath")
                 decodeFromInputStream(inputStream, cacheKey, callback, true, null, name)
             } catch (t: Throwable) {
                 val e = if (t is Exception) t else Exception(t)
@@ -215,12 +225,11 @@ class SvgaParser(
     ): (() -> Unit)? {
         val cacheKey = SvgaDiskCache.buildCacheKey(url)
         val cached = SvgaMemoryCache.instance.get(cacheKey)
+        val handler = Handler(Looper.getMainLooper())
         if (cached != null) {
-            callback?.onComplete(cached)
+            handler.post { callback?.onComplete(cached) }
             return null
         }
-
-        val handler = Handler(Looper.getMainLooper())
 
         // 1. 优先尝试从磁盘缓存极速命中，彻底跳过重复网络下载
         if (SvgaDiskCache.isCached(cacheKey)) {
@@ -431,6 +440,11 @@ class SvgaParser(
             return
         }
         val cacheKey = SvgaDiskCache.buildCacheKey("file://${file.absolutePath}")
+        val cached = SvgaMemoryCache.instance.get(cacheKey)
+        if (cached != null) {
+            handler.post { callback?.onComplete(cached) }
+            return
+        }
         threadPoolExecutor.execute {
             try {
                 decodeFromInputStream(FileInputStream(file), cacheKey, callback, true, null, file.name)
@@ -537,6 +551,10 @@ class SvgaParser(
         val specFile = File(cacheDir, "movie.spec")
         val entity = when {
             binaryFile.exists() -> {
+                try {
+                    binaryFile.setLastModified(System.currentTimeMillis())
+                    cacheDir.setLastModified(System.currentTimeMillis())
+                } catch (_: Throwable) {}
                 val movieEntity = try {
                     MovieEntity.ADAPTER.decode(binaryFile.readBytes())
                 } catch (e: Exception) {
@@ -550,6 +568,10 @@ class SvgaParser(
                 SvgaVideoEntity(movieEntity, cacheDir, frameWidth, frameHeight, needCutBitmap)
             }
             specFile.exists() -> {
+                try {
+                    specFile.setLastModified(System.currentTimeMillis())
+                    cacheDir.setLastModified(System.currentTimeMillis())
+                } catch (_: Throwable) {}
                 val json = try {
                     JSONObject(specFile.readText())
                 } catch (e: Exception) {

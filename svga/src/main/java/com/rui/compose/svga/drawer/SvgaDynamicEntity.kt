@@ -51,6 +51,9 @@ class SvgaDynamicEntity {
 
     private var replaceFinish: ReplaceFinish? = null
 
+    /** 动态属性变更监听器，供 Compose / View 监听即时重绘画面 */
+    var onDynamicChanged: (() -> Unit)? = null
+
     interface ReplaceFinish {
         fun replaceFinish()
     }
@@ -61,11 +64,13 @@ class SvgaDynamicEntity {
 
     fun setHidden(value: Boolean, forKey: String): SvgaDynamicEntity {
         this.dynamicHidden[forKey] = value
+        onDynamicChanged?.invoke()
         return this
     }
 
     fun setDynamicImage(bitmap: Bitmap, forKey: String): SvgaDynamicEntity {
         this.dynamicImage[forKey] = bitmap
+        onDynamicChanged?.invoke()
         return this
     }
 
@@ -123,6 +128,7 @@ class SvgaDynamicEntity {
                         handler.post {
                             dynamicImage[forKey] = bitmap
                             notifyResReplaced()
+                            onDynamicChanged?.invoke()
                         }
                     } else {
                         handler.post { notifyResReplaced() }
@@ -144,12 +150,14 @@ class SvgaDynamicEntity {
         this.isTextDirty = true
         this.dynamicText[forKey] = text
         this.dynamicTextPaint[forKey] = textPaint
+        onDynamicChanged?.invoke()
         return this
     }
 
     fun setDynamicText(layoutText: StaticLayout, forKey: String): SvgaDynamicEntity {
         this.isTextDirty = true
         this.dynamicStaticLayoutText[forKey] = layoutText
+        onDynamicChanged?.invoke()
         return this
     }
 
@@ -157,12 +165,14 @@ class SvgaDynamicEntity {
         this.isTextDirty = true
         BoringLayout.isBoring(layoutText.text, layoutText.paint)?.let {
             this.dynamicBoringLayoutText[forKey] = layoutText
+            onDynamicChanged?.invoke()
         }
         return this
     }
 
     fun setDynamicDrawer(drawer: (canvas: Canvas, frameIndex: Int) -> Boolean, forKey: String): SvgaDynamicEntity {
         this.dynamicDrawer[forKey] = drawer
+        onDynamicChanged?.invoke()
         return this
     }
 
@@ -199,6 +209,7 @@ class SvgaDynamicEntity {
         forKey: String
     ): SvgaDynamicEntity {
         this.dynamicDrawerSized[forKey] = drawer
+        onDynamicChanged?.invoke()
         return this
     }
 
@@ -217,6 +228,7 @@ class SvgaDynamicEntity {
         this.dynamicClickArea.clear()
         this.clickMap.clear()
         this.dynamicDrawerSized.clear()
+        onDynamicChanged?.invoke()
     }
 }
 

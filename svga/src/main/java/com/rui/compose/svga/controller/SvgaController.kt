@@ -156,6 +156,15 @@ class SvgaController(
     }
 
     /**
+     * 重试加载当前资源（重置加载状态并重新触发加载流程）
+     */
+    fun retry() {
+        loadState = SvgaLoadState.Loading
+        videoEntity = null
+        commandTrigger++
+    }
+
+    /**
      * 强制触发当前帧画布重绘（常用于暂停状态下动态修改文本或位图后的画面即时刷新）
      */
     fun requestRedraw() {

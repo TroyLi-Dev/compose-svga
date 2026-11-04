@@ -380,4 +380,31 @@ class SvgaRedesignUnitTest {
             cacheDir.deleteRecursively()
         }
     }
+
+    @Test
+    fun testControllerRetry() {
+        val controller = com.rui.compose.svga.controller.SvgaController(initialModel = "retry.svga")
+        controller.retry()
+        assertEquals(com.rui.compose.svga.model.SvgaLoadState.Loading, controller.loadState)
+        assertNull(controller.videoEntity)
+    }
+
+    @Test
+    fun testDynamicEntityOnChangedCallback() {
+        val dynamic = com.rui.compose.svga.drawer.SvgaDynamicEntity()
+        var changedCount = 0
+        dynamic.onDynamicChanged = { changedCount++ }
+
+        dynamic.setHidden(true, "key1")
+        assertEquals(1, changedCount)
+
+        dynamic.setDynamicText("test", android.text.TextPaint(), "key2")
+        assertEquals(2, changedCount)
+
+        dynamic.setDynamicDrawer({ _, _ -> true }, "key3")
+        assertEquals(3, changedCount)
+
+        dynamic.clearDynamicObjects()
+        assertEquals(4, changedCount)
+    }
 }

@@ -47,6 +47,14 @@ open class SvgaDrawable(
 
     private val drawer = SvgaCanvasDrawer(videoEntity, dynamicEntity)
 
+    init {
+        val prevListener = dynamicEntity.onDynamicChanged
+        dynamicEntity.onDynamicChanged = {
+            invalidateSelf()
+            prevListener?.invoke()
+        }
+    }
+
     private var alphaVal = 255
     private var colorFilterVal: ColorFilter? = null
     private val layerPaint = android.graphics.Paint()

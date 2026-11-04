@@ -418,7 +418,9 @@ class SvgaCanvasDrawer(
             } else {
                 cached?.bitmap?.let { old -> if (!old.isRecycled) old.recycle() }
                 it.paint.isAntiAlias = true
-                val layout = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                val layout = if (it.width == drawingBitmap.width) {
+                    it
+                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                     val lineMax = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
                         it.maxLines
                     } else {
