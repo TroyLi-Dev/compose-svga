@@ -46,15 +46,14 @@ open class SvgaDrawable(
         }
 
     private val drawer = SvgaCanvasDrawer(videoEntity, dynamicEntity)
-    private val prevDynamicListener = dynamicEntity.onDynamicChanged
+    private val dynamicListener: () -> Unit
 
     init {
         val weakThis = java.lang.ref.WeakReference(this)
-        val prev = prevDynamicListener
-        dynamicEntity.onDynamicChanged = {
+        dynamicListener = {
             weakThis.get()?.invalidateSelf()
-            prev?.invoke()
         }
+        dynamicEntity.addOnDynamicChangedListener(dynamicListener)
     }
 
     private var alphaVal = 255
@@ -133,9 +132,7 @@ open class SvgaDrawable(
 
     fun clear() {
         cleared = true
-        if (dynamicEntity.onDynamicChanged != null) {
-            dynamicEntity.onDynamicChanged = prevDynamicListener
-        }
+        dynamicEntity.removeOnDynamicChangedListener(dynamicListener)
         drawer.stopAudio()
         drawer.clear()
     }

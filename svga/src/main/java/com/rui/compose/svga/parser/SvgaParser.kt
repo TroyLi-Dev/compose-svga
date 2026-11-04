@@ -68,7 +68,14 @@ class SvgaParser(
             60L,
             TimeUnit.SECONDS,
             LinkedBlockingQueue<Runnable>(),
-            { r -> Thread(r, "SvgaParser-Thread-${threadNum.getAndIncrement()}") }
+            { r ->
+                Thread {
+                    android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
+                    r.run()
+                }.apply {
+                    name = "SvgaParser-Thread-${threadNum.getAndIncrement()}"
+                }
+            }
         ).apply {
             allowCoreThreadTimeOut(true)
         }
@@ -241,30 +248,7 @@ class SvgaParser(
             return null
         }
 
-        // 1. 优先尝试从磁盘缓存极速命中，彻底跳过重复网络下载
-        if (SvgaDiskCache.isCached(cacheKey)) {
-            val cacheDir = SvgaDiskCache.buildCacheDir(cacheKey)
-            threadPoolExecutor.execute {
-                try {
-                    val lock = getFileLock(cacheKey)
-                    val entity = synchronized(lock) {
-                        loadFromCacheDir(cacheDir)
-                    }
-                    entity.cacheKey = cacheKey
-                    entity.prepare({
-                        SvgaMemoryCache.instance.put(cacheKey, entity)
-                        handler.post { callback?.onComplete(entity) }
-                    })
-                } catch (e: Exception) {
-                    LogUtils.warn(TAG, "Disk cache corrupted for $url, re-downloading: ${e.message}")
-                    cacheDir.deleteRecursively()
-                    startDownloadUrlMerged(url, cacheKey, callback, handler)
-                }
-            }
-            return null
-        }
-
-        // 2. 磁盘无缓存时走在途合并网络下载 (SingleFlight)
+        // 统一走在途任务合并 (SingleFlight)，无论冷启动还是已在磁盘，杜绝多组件并发重复解压解码与内存实体泛滥
         return startDownloadUrlMerged(url, cacheKey, callback, handler)
     }
 
@@ -312,6 +296,37 @@ class SvgaParser(
     ) {
         val url = task.url
         val cacheKey = task.cacheKey
+
+        // 1. 若磁盘已有完整缓存，直接在合并任务中安全加载，避免多线程并发重复解压解码
+        if (SvgaDiskCache.isCached(cacheKey)) {
+            val cacheDir = SvgaDiskCache.buildCacheDir(cacheKey)
+            try {
+                val lock = getFileLock(cacheKey)
+                val entity = synchronized(lock) {
+                    loadFromCacheDir(cacheDir)
+                }
+                entity.cacheKey = cacheKey
+                entity.prepare({
+                    SvgaMemoryCache.instance.put(cacheKey, entity)
+                    val callbacksToNotify: List<ParseCompletion>
+                    synchronized(inFlightLock) {
+                        task.isCompleted = true
+                        if (inFlightUrlTasks[cacheKey] === task) {
+                            inFlightUrlTasks.remove(cacheKey)
+                        }
+                        callbacksToNotify = task.callbacks.toList()
+                    }
+                    handler.post {
+                        callbacksToNotify.forEach { it.onComplete(entity) }
+                    }
+                })
+                return
+            } catch (e: Exception) {
+                LogUtils.warn(TAG, "Disk cache corrupted for $url, re-downloading: ${e.message}")
+                cacheDir.deleteRecursively()
+            }
+        }
+
         val maxRetries = 2
         var lastException: Exception? = null
 

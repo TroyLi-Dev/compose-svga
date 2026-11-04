@@ -92,6 +92,7 @@ fun SvgaAnimation(
     isStop: Boolean = controller?.let { it.isPaused || it.playState == SvgaPlayState.Idle } ?: false,
     isMute: Boolean = controller?.isMuted ?: false,
     contentScale: ContentScale = ContentScale.Fit,
+    needCutBitmap: Boolean = (priority == SvgaPriority.Low),
     onLoading: () -> Unit = {},
     onPlay: () -> Unit = {},
     onSuccess: (SvgaVideoEntity) -> Unit = {},
@@ -156,13 +157,10 @@ fun SvgaAnimation(
 
     DisposableEffect(dynamicEntity) {
         val dynamic = dynamicEntity ?: return@DisposableEffect onDispose {}
-        val prevListener = dynamic.onDynamicChanged
-        dynamic.onDynamicChanged = {
-            redrawTrigger++
-            prevListener?.invoke()
-        }
+        val listener: () -> Unit = { redrawTrigger++ }
+        dynamic.addOnDynamicChangedListener(listener)
         onDispose {
-            dynamic.onDynamicChanged = prevListener
+            dynamic.removeOnDynamicChangedListener(listener)
         }
     }
 
@@ -200,7 +198,7 @@ fun SvgaAnimation(
         currentOnLoading()
         try {
             val entity = suspendCancellableCoroutine<SvgaVideoEntity> { continuation ->
-                val parser = SvgaParser(context)
+                val parser = SvgaParser(context, needCutBitmap = needCutBitmap)
                 if (componentSize.width > 0 && componentSize.height > 0) {
                     parser.setFrameSize(componentSize.width, componentSize.height)
                 }
