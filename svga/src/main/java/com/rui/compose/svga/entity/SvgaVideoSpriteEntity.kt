@@ -1,5 +1,6 @@
 package com.rui.compose.svga.entity
 
+import android.graphics.Bitmap
 import com.rui.compose.svga.proto.SpriteEntity
 import com.rui.compose.svga.utils.log.LogUtils
 import org.json.JSONObject
@@ -14,6 +15,8 @@ class SvgaVideoSpriteEntity {
     val bitmapKey: String?
     val noExtKey: String?
     val noExtBitmapKey: String?
+    var defaultBitmap: Bitmap? = null
+        internal set
 
     constructor(obj: JSONObject) {
         val rawImageKey = obj.optString("imageKey")

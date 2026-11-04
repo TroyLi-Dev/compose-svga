@@ -10,7 +10,7 @@ class SvgaVideoSpriteFrameEntity {
     var alpha = 0.0
         private set
 
-    var layout = SvgaRect(0.0, 0.0, 0.0, 0.0)
+    var layout = SvgaRect.EMPTY
         private set
 
     var transform = Matrix()
@@ -24,12 +24,15 @@ class SvgaVideoSpriteFrameEntity {
     constructor(obj: JSONObject) {
         this.alpha = obj.optDouble("alpha", 0.0).coerceIn(0.0, 1.0)
         obj.optJSONObject("layout")?.let {
-            this.layout = SvgaRect(
-                it.optDouble("x", 0.0),
-                it.optDouble("y", 0.0),
-                it.optDouble("width", 0.0),
-                it.optDouble("height", 0.0)
-            )
+            val x = it.optDouble("x", 0.0)
+            val y = it.optDouble("y", 0.0)
+            val width = it.optDouble("width", 0.0)
+            val height = it.optDouble("height", 0.0)
+            this.layout = if (x == 0.0 && y == 0.0 && width == 0.0 && height == 0.0) {
+                SvgaRect.EMPTY
+            } else {
+                SvgaRect(x, y, width, height)
+            }
         }
         obj.optJSONObject("transform")?.let {
             val a = it.optDouble("a", 1.0).toFloat()
@@ -73,12 +76,15 @@ class SvgaVideoSpriteFrameEntity {
     constructor(obj: FrameEntity) {
         this.alpha = obj.alpha.toDouble().coerceIn(0.0, 1.0)
         obj.layout?.let {
-            this.layout = SvgaRect(
-                it.x.toDouble(),
-                it.y.toDouble(),
-                it.width.toDouble(),
-                it.height.toDouble()
-            )
+            val x = it.x.toDouble()
+            val y = it.y.toDouble()
+            val width = it.width.toDouble()
+            val height = it.height.toDouble()
+            this.layout = if (x == 0.0 && y == 0.0 && width == 0.0 && height == 0.0) {
+                SvgaRect.EMPTY
+            } else {
+                SvgaRect(x, y, width, height)
+            }
         }
         obj.transform?.let {
             if (it.a.isFinite() && it.b.isFinite() && it.c.isFinite() && it.d.isFinite() && it.tx.isFinite() && it.ty.isFinite()) {

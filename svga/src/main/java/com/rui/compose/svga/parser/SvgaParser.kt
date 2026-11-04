@@ -55,6 +55,19 @@ class SvgaParser(
     companion object {
         private const val TAG = "SvgaParser"
         private val segmentLocks = Array(32) { Any() }
+        private val threadLocalBuffer = object : ThreadLocal<ByteArray>() {
+            override fun initialValue(): ByteArray = ByteArray(16384)
+        }
+
+        private val mainHandler = Handler(Looper.getMainLooper())
+
+        private fun postToMain(action: () -> Unit) {
+            if (Looper.myLooper() == Looper.getMainLooper()) {
+                action()
+            } else {
+                mainHandler.post(action)
+            }
+        }
 
         private fun getFileLock(cacheKey: String): Any =
             segmentLocks[kotlin.math.abs(cacheKey.hashCode()) and 31]
@@ -118,7 +131,7 @@ class SvgaParser(
         callback: ParseCompletion?
     ): (() -> Unit)? {
         if (model == null) {
-            Handler(Looper.getMainLooper()).post {
+            postToMain {
                 callback?.onError(IllegalArgumentException("Model cannot be null"), "")
             }
             return null
@@ -137,6 +150,16 @@ class SvgaParser(
             }
             is SvgaFetchResult.Stream -> {
                 decodeFromInputStream(model.inputStream, model.cacheKey, callback, true, null, "")
+                return null
+            }
+            is ByteArray -> {
+                val cacheKey = SvgaDiskCache.buildCacheKey("bytearray://${System.identityHashCode(model)}")
+                decodeFromInputStream(ByteArrayInputStream(model), cacheKey, callback, true, null, "byteArray")
+                return null
+            }
+            is InputStream -> {
+                val cacheKey = SvgaDiskCache.buildCacheKey("inputstream://${System.identityHashCode(model)}")
+                decodeFromInputStream(model, cacheKey, callback, true, null, "inputStream")
                 return null
             }
             is String -> {
@@ -172,14 +195,14 @@ class SvgaParser(
                     val cacheKey = SvgaDiskCache.buildCacheKey("rawres://$model")
                     val cached = SvgaMemoryCache.instance.get(cacheKey)
                     if (cached != null) {
-                        Handler(Looper.getMainLooper()).post { callback?.onComplete(cached) }
+                        postToMain { callback?.onComplete(cached) }
                         return null
                     }
                     try {
                         val inputStream = appContext.resources.openRawResource(model)
                         decodeFromInputStream(inputStream, cacheKey, callback, true, null, model.toString())
                     } catch (e: Exception) {
-                        Handler(Looper.getMainLooper()).post { callback?.onError(e, model.toString()) }
+                        postToMain { callback?.onError(e, model.toString()) }
                     }
                     return null
                 }
@@ -193,12 +216,12 @@ class SvgaParser(
                             }
                         } catch (t: Throwable) {
                             val e = if (t is Exception) t else Exception(t)
-                            Handler(Looper.getMainLooper()).post { callback?.onError(e, model.toString()) }
+                            postToMain { callback?.onError(e, model.toString()) }
                         }
                     }
                     return null
                 }
-                Handler(Looper.getMainLooper()).post {
+                postToMain {
                     callback?.onError(IllegalArgumentException("Unsupported SVGA model type: ${model.javaClass.name}"), model.toString())
                 }
                 return null
@@ -210,9 +233,8 @@ class SvgaParser(
         name: String,
         callback: ParseCompletion?
     ) {
-        val handler = Handler(Looper.getMainLooper())
         val appContext = context ?: run {
-            handler.post { callback?.onError(Exception("Context is null"), name) }
+            postToMain { callback?.onError(Exception("Context is null"), name) }
             return
         }
         var cleanPath = name.trim()
@@ -225,7 +247,7 @@ class SvgaParser(
         val cacheKey = SvgaDiskCache.buildCacheKey("assets://$cleanPath")
         val cached = SvgaMemoryCache.instance.get(cacheKey)
         if (cached != null) {
-            handler.post { callback?.onComplete(cached) }
+            postToMain { callback?.onComplete(cached) }
             return
         }
         threadPoolExecutor.execute {
@@ -234,7 +256,7 @@ class SvgaParser(
                 decodeFromInputStream(inputStream, cacheKey, callback, true, null, name)
             } catch (t: Throwable) {
                 val e = if (t is Exception) t else Exception(t)
-                handler.post { callback?.onError(e, name) }
+                postToMain { callback?.onError(e, name) }
             }
         }
     }
@@ -245,21 +267,19 @@ class SvgaParser(
     ): (() -> Unit)? {
         val cacheKey = SvgaDiskCache.buildCacheKey(url)
         val cached = SvgaMemoryCache.instance.get(cacheKey)
-        val handler = Handler(Looper.getMainLooper())
         if (cached != null) {
-            handler.post { callback?.onComplete(cached) }
+            postToMain { callback?.onComplete(cached) }
             return null
         }
 
         // 统一走在途任务合并 (SingleFlight)，无论冷启动还是已在磁盘，杜绝多组件并发重复解压解码与内存实体泛滥
-        return startDownloadUrlMerged(url, cacheKey, callback, handler)
+        return startDownloadUrlMerged(url, cacheKey, callback)
     }
 
     private fun startDownloadUrlMerged(
         url: URL,
         cacheKey: String,
-        callback: ParseCompletion?,
-        handler: Handler
+        callback: ParseCompletion?
     ): (() -> Unit)? {
         var isFirst = false
         val task: InFlightUrlTask
@@ -280,7 +300,7 @@ class SvgaParser(
 
         if (isFirst) {
             threadPoolExecutor.execute {
-                doDownloadUrlMerged(task, handler)
+                doDownloadUrlMerged(task)
             }
         }
 
@@ -294,8 +314,7 @@ class SvgaParser(
     }
 
     private fun doDownloadUrlMerged(
-        task: InFlightUrlTask,
-        handler: Handler
+        task: InFlightUrlTask
     ) {
         val url = task.url
         val cacheKey = task.cacheKey
@@ -319,7 +338,7 @@ class SvgaParser(
                         }
                         callbacksToNotify = task.callbacks.toList()
                     }
-                    handler.post {
+                    postToMain {
                         callbacksToNotify.forEach { it.onComplete(entity) }
                     }
                 })
@@ -426,7 +445,7 @@ class SvgaParser(
                         }
                         callbacksToNotify = task.callbacks.toList()
                     }
-                    handler.post {
+                    postToMain {
                         callbacksToNotify.forEach { it.onComplete(entity) }
                     }
                 })
@@ -453,7 +472,7 @@ class SvgaParser(
             }
             callbacksToNotify = task.callbacks.toList()
         }
-        handler.post {
+        postToMain {
             callbacksToNotify.forEach { it.onError(finalException, url.toString()) }
         }
     }
@@ -464,15 +483,14 @@ class SvgaParser(
         callback: ParseCompletion?,
         customCacheKey: String? = null
     ) {
-        val handler = Handler(Looper.getMainLooper())
         if (!file.exists()) {
-            handler.post { callback?.onError(Exception("File not found: ${file.absolutePath}"), file.name) }
+            postToMain { callback?.onError(Exception("File not found: ${file.absolutePath}"), file.name) }
             return
         }
         val cacheKey = customCacheKey ?: SvgaDiskCache.buildCacheKey("file://${file.absolutePath}")
         val cached = SvgaMemoryCache.instance.get(cacheKey)
         if (cached != null) {
-            handler.post { callback?.onComplete(cached) }
+            postToMain { callback?.onComplete(cached) }
             return
         }
         threadPoolExecutor.execute {
@@ -480,7 +498,7 @@ class SvgaParser(
                 decodeFromInputStream(FileInputStream(file), cacheKey, callback, true, null, file.name)
             } catch (t: Throwable) {
                 val e = if (t is Exception) t else Exception(t)
-                handler.post { callback?.onError(e, file.name) }
+                postToMain { callback?.onError(e, file.name) }
             }
         }
     }
@@ -493,24 +511,58 @@ class SvgaParser(
         playCallback: ((List<File>) -> Unit)? = null,
         alias: String = ""
     ) {
-        val handler = Handler(Looper.getMainLooper())
         val cached = SvgaMemoryCache.instance.get(cacheKey)
         if (cached != null) {
-            handler.post { callback?.onComplete(cached) }
+            postToMain { callback?.onComplete(cached) }
             if (closeStream) try { inputStream.close() } catch (_: Exception) {}
             return
         }
 
         val decodeTask = Runnable {
             try {
+                SvgaMemoryCache.instance.get(cacheKey)?.let { memCached ->
+                    postToMain { callback?.onComplete(memCached) }
+                    return@Runnable
+                }
+
+                val lock = getFileLock(cacheKey)
+                val cacheDir = SvgaDiskCache.buildCacheDir(cacheKey)
+
+                // 1. 若磁盘已有完整缓存，直接在锁内加载，无需读取 inputStream 也无需二次解压
+                if (SvgaDiskCache.isCached(cacheKey)) {
+                    val diskEntity = synchronized(lock) {
+                        val innerMem = SvgaMemoryCache.instance.get(cacheKey)
+                        if (innerMem != null) return@synchronized innerMem
+                        try {
+                            loadFromCacheDir(cacheDir)
+                        } catch (e: Exception) {
+                            LogUtils.warn(TAG, "Corrupted disk cache for $cacheKey, falling back to stream decode: ${e.message}")
+                            cacheDir.deleteRecursively()
+                            null
+                        }
+                    }
+                    if (diskEntity != null) {
+                        diskEntity.cacheKey = cacheKey
+                        diskEntity.prepare({
+                            SvgaMemoryCache.instance.put(cacheKey, diskEntity)
+                            postToMain { callback?.onComplete(diskEntity) }
+                        }, playCallback)
+                        return@Runnable
+                    }
+                }
+
+                // 2. 磁盘未命中，此时才读取输入流并进行解压
                 val bytes = readStreamToByteArray(inputStream)
                 if (bytes.isEmpty()) throw SvgaException.DecodeException(alias, DecodeReason.EMPTY_STREAM, "Empty input stream")
 
-                val cacheDir = SvgaDiskCache.buildCacheDir(cacheKey)
-                val lock = getFileLock(cacheKey)
                 synchronized(lock) {
+                    val memCached = SvgaMemoryCache.instance.get(cacheKey)
+                    if (memCached != null) {
+                        postToMain { callback?.onComplete(memCached) }
+                        return@Runnable
+                    }
                     if (isZipFile(bytes)) {
-                        if (!cacheDir.exists() || cacheDir.listFiles().isNullOrEmpty()) {
+                        if (!cacheDir.exists() || !File(cacheDir, "movie.spec").exists()) {
                             unzipAtomic(ByteArrayInputStream(bytes), cacheDir)
                         }
                         val entity = try {
@@ -524,7 +576,7 @@ class SvgaParser(
                         entity.cacheKey = cacheKey
                         entity.prepare({
                             SvgaMemoryCache.instance.put(cacheKey, entity)
-                            handler.post { callback?.onComplete(entity) }
+                            postToMain { callback?.onComplete(entity) }
                         }, playCallback)
                     } else {
                         inflate(bytes)?.let { inflatedBytes ->
@@ -549,14 +601,14 @@ class SvgaParser(
                             entity.cacheKey = cacheKey
                             entity.prepare({
                                 SvgaMemoryCache.instance.put(cacheKey, entity)
-                                handler.post { callback?.onComplete(entity) }
+                                postToMain { callback?.onComplete(entity) }
                             }, playCallback)
                         } ?: throw SvgaException.DecodeException(alias, DecodeReason.INVALID_PROTOBUF, "Inflate failed")
                     }
                 }
             } catch (t: Throwable) {
                 val e = if (t is Exception) t else Exception(t)
-                handler.post { callback?.onError(e, alias) }
+                postToMain { callback?.onError(e, alias) }
             } finally {
                 if (closeStream) try { inputStream.close() } catch (_: Exception) {}
             }
@@ -572,7 +624,7 @@ class SvgaParser(
         } catch (t: Throwable) {
             if (closeStream) try { inputStream.close() } catch (_: Exception) {}
             val e = if (t is Exception) t else Exception(t)
-            handler.post { callback?.onError(e, alias) }
+            postToMain { callback?.onError(e, alias) }
         }
     }
 
@@ -642,6 +694,7 @@ class SvgaParser(
         val canonicalDest = cacheDir.canonicalPath
         var totalUncompressedBytes = 0L
         var totalEntries = 0
+        val buffer = threadLocalBuffer.get() ?: ByteArray(16384)
         ZipInputStream(BufferedInputStream(inputStream)).use { zis ->
             var entry = zis.nextEntry
             while (entry != null) {
@@ -663,7 +716,6 @@ class SvgaParser(
                 } else {
                     file.parentFile?.mkdirs()
                     FileOutputStream(file).use { fos ->
-                        val buffer = ByteArray(16384)
                         var len: Int
                         while (zis.read(buffer).also { len = it } > 0) {
                             totalUncompressedBytes += len
@@ -715,7 +767,7 @@ class SvgaParser(
         val inflater = Inflater()
         return try {
             inflater.setInput(byteArray, 0, byteArray.size)
-            val result = ByteArray(16384)
+            val result = threadLocalBuffer.get() ?: ByteArray(16384)
             val initialCap = (byteArray.size * 2).coerceIn(32768, MAX_INFLATED_BYTES)
             val baos = ByteArrayOutputStream(initialCap)
             var totalBytes = 0
@@ -740,7 +792,7 @@ class SvgaParser(
     }
 
     private fun readStreamToByteArray(inputStream: InputStream): ByteArray {
-        val buffer = ByteArray(16384)
+        val buffer = threadLocalBuffer.get() ?: ByteArray(16384)
         val initialCap = kotlin.math.max(
             32768,
             try { inputStream.available().coerceIn(0, MAX_STREAM_BYTES) } catch (_: Throwable) { 32768 }

@@ -1,35 +1,41 @@
 package com.rui.compose.svga.drawer
 
+import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.widget.ImageView
 import com.rui.compose.svga.entity.SvgaVideoEntity
 import com.rui.compose.svga.entity.SvgaVideoSpriteFrameEntity
-import androidx.core.util.Pools
 import kotlin.math.max
 
 abstract class SvgaBaseDrawer(val videoItem: SvgaVideoEntity) {
 
     val scaleInfo = SvgaScaleInfo()
 
-    private val spritePool = Pools.SimplePool<SvgaDrawerSprite>(max(1, videoItem.spriteList.size))
+    protected val drawerSprites: Array<SvgaDrawerSprite> = Array(videoItem.spriteList.size) { i ->
+        SvgaDrawerSprite(videoItem.spriteList[i])
+    }
     private val frameSpritesList = ArrayList<SvgaDrawerSprite>(max(1, videoItem.spriteList.size))
 
     class SvgaDrawerSprite(
-        var _matteKey: String? = null,
-        var _imageKey: String? = null,
-        var _bitmapKey: String? = null,
-        var _noExtKey: String? = null,
-        var _noExtBitmapKey: String? = null,
-        var _isMatte: Boolean = false,
+        val spriteEntity: com.rui.compose.svga.entity.SvgaVideoSpriteEntity? = null,
         var _frameEntity: SvgaVideoSpriteFrameEntity? = null
     ) {
-        val matteKey get() = _matteKey
-        val imageKey get() = _imageKey
-        val bitmapKey get() = _bitmapKey
-        val noExtKey get() = _noExtKey
-        val noExtBitmapKey get() = _noExtBitmapKey
-        val isMatte get() = _isMatte
-        val frameEntity get() = _frameEntity!!
+        var _matteKey: String? = null
+        var _imageKey: String? = null
+        var _bitmapKey: String? = null
+        var _noExtKey: String? = null
+        var _noExtBitmapKey: String? = null
+        var _isMatte: Boolean = false
+        var _defaultBitmap: Bitmap? = null
+
+        val matteKey: String? get() = spriteEntity?.matteKey ?: _matteKey
+        val imageKey: String? get() = spriteEntity?.imageKey ?: _imageKey
+        val bitmapKey: String? get() = spriteEntity?.bitmapKey ?: _bitmapKey
+        val noExtKey: String? get() = spriteEntity?.noExtKey ?: _noExtKey
+        val noExtBitmapKey: String? get() = spriteEntity?.noExtBitmapKey ?: _noExtBitmapKey
+        val isMatte: Boolean get() = spriteEntity?.isMatte ?: _isMatte
+        val defaultBitmap: Bitmap? get() = spriteEntity?.defaultBitmap ?: _defaultBitmap
+        val frameEntity: SvgaVideoSpriteFrameEntity get() = _frameEntity!!
     }
 
     internal fun requestFrameSprites(frameIndex: Int): List<SvgaDrawerSprite> {
@@ -39,22 +45,15 @@ abstract class SvgaBaseDrawer(val videoItem: SvgaVideoEntity) {
         for (i in 0 until size) {
             val spriteItem = list[i]
             val frames = spriteItem.frames
-            if (frameIndex >= 0 && frameIndex < frames.size) {
-                val imageKey = spriteItem.imageKey
-                if (imageKey != null) {
+            if (frameIndex in frames.indices) {
+                if (spriteItem.imageKey != null) {
                     val frame = frames[frameIndex]
                     if (!spriteItem.isMatte && frame.alpha <= 0.0) {
                         continue
                     }
-                    val sprite = spritePool.acquire() ?: SvgaDrawerSprite()
-                    sprite._matteKey = spriteItem.matteKey
-                    sprite._imageKey = imageKey
-                    sprite._bitmapKey = spriteItem.bitmapKey
-                    sprite._noExtKey = spriteItem.noExtKey
-                    sprite._noExtBitmapKey = spriteItem.noExtBitmapKey
-                    sprite._isMatte = spriteItem.isMatte
-                    sprite._frameEntity = frame
-                    frameSpritesList.add(sprite)
+                    val drawerSprite = drawerSprites[i]
+                    drawerSprite._frameEntity = frame
+                    frameSpritesList.add(drawerSprite)
                 }
             }
         }
@@ -62,20 +61,6 @@ abstract class SvgaBaseDrawer(val videoItem: SvgaVideoEntity) {
     }
 
     internal fun releaseFrameSprites(sprites: List<SvgaDrawerSprite>) {
-        val size = sprites.size
-        for (i in 0 until size) {
-            val s = sprites[i]
-            s._matteKey = null
-            s._imageKey = null
-            s._bitmapKey = null
-            s._noExtKey = null
-            s._noExtBitmapKey = null
-            s._isMatte = false
-            s._frameEntity = null
-            try {
-                spritePool.release(s)
-            } catch (_: Throwable) {}
-        }
         if (sprites === frameSpritesList) {
             frameSpritesList.clear()
         }

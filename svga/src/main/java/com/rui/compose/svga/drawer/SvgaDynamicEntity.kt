@@ -20,6 +20,9 @@ interface SvgaClickAreaListener {
     fun onResponseArea(key: String, x0: Int, y0: Int, x1: Int, y1: Int)
 }
 
+/** 全局只读空动态元素单例，彻底避免多列表网格为无动态内容的组件重复创建 10 个 ConcurrentHashMap */
+val EMPTY_DYNAMIC_ENTITY: SvgaDynamicEntity by lazy(LazyThreadSafetyMode.PUBLICATION) { SvgaDynamicEntity() }
+
 /**
  * SVGA 动态素材与文字替换实体
  */

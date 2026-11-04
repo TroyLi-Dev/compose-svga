@@ -174,14 +174,14 @@ open class SvgaImageView @JvmOverloads constructor(
     }
 
     fun setVideoItem(videoItem: SvgaVideoEntity?) {
-        setVideoItem(videoItem, SvgaDynamicEntity())
+        setVideoItem(videoItem, com.rui.compose.svga.drawer.EMPTY_DYNAMIC_ENTITY)
     }
 
     fun setVideoItem(videoItem: SvgaVideoEntity?, dynamicItem: SvgaDynamicEntity?) {
         if (videoItem == null) {
             setImageDrawable(null)
         } else {
-            val drawable = SvgaDrawable(videoItem, dynamicItem ?: SvgaDynamicEntity()).apply {
+            val drawable = SvgaDrawable(videoItem, dynamicItem ?: com.rui.compose.svga.drawer.EMPTY_DYNAMIC_ENTITY).apply {
                 this.scaleType = this@SvgaImageView.scaleType
                 this.cleared = true
             }

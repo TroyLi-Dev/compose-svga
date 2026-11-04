@@ -2,6 +2,7 @@ package com.rui.compose.svga.entity
 
 import android.graphics.Color
 import android.graphics.Matrix
+import android.graphics.Paint
 import android.graphics.Path
 import com.rui.compose.svga.proto.ShapeEntity
 import org.json.JSONArray
@@ -30,6 +31,16 @@ class SvgaVideoShapeEntity {
         var miterLimit = 0
             internal set
         var lineDash = FloatArray(0)
+            internal set
+        var paintCap: Paint.Cap = Paint.Cap.BUTT
+            internal set
+        var paintJoin: Paint.Join = Paint.Join.MITER
+            internal set
+        @Volatile
+        var cachedDashEffect: android.graphics.DashPathEffect? = null
+            internal set
+        @Volatile
+        var cachedDashScale: Float = -1f
             internal set
     }
 
@@ -155,7 +166,17 @@ class SvgaVideoShapeEntity {
             }
             styles.strokeWidth = it.optDouble("strokeWidth", 0.0).toFloat()
             styles.lineCap = it.optString("lineCap", "butt")
+            styles.paintCap = when {
+                styles.lineCap.equals("round", true) -> Paint.Cap.ROUND
+                styles.lineCap.equals("square", true) -> Paint.Cap.SQUARE
+                else -> Paint.Cap.BUTT
+            }
             styles.lineJoin = it.optString("lineJoin", "miter")
+            styles.paintJoin = when {
+                styles.lineJoin.equals("bevel", true) -> Paint.Join.BEVEL
+                styles.lineJoin.equals("round", true) -> Paint.Join.ROUND
+                else -> Paint.Join.MITER
+            }
             styles.miterLimit = it.optInt("miterLimit", 0)
             it.optJSONArray("lineDash")?.let { dashes ->
                 styles.lineDash = FloatArray(dashes.length())
@@ -200,14 +221,32 @@ class SvgaVideoShapeEntity {
             }
             styles.strokeWidth = it.strokeWidth
             when (it.lineCap) {
-                ShapeEntity.ShapeStyle.LineCap.LineCap_BUTT -> styles.lineCap = "butt"
-                ShapeEntity.ShapeStyle.LineCap.LineCap_ROUND -> styles.lineCap = "round"
-                ShapeEntity.ShapeStyle.LineCap.LineCap_SQUARE -> styles.lineCap = "square"
+                ShapeEntity.ShapeStyle.LineCap.LineCap_ROUND -> {
+                    styles.lineCap = "round"
+                    styles.paintCap = Paint.Cap.ROUND
+                }
+                ShapeEntity.ShapeStyle.LineCap.LineCap_SQUARE -> {
+                    styles.lineCap = "square"
+                    styles.paintCap = Paint.Cap.SQUARE
+                }
+                else -> {
+                    styles.lineCap = "butt"
+                    styles.paintCap = Paint.Cap.BUTT
+                }
             }
             when (it.lineJoin) {
-                ShapeEntity.ShapeStyle.LineJoin.LineJoin_BEVEL -> styles.lineJoin = "bevel"
-                ShapeEntity.ShapeStyle.LineJoin.LineJoin_MITER -> styles.lineJoin = "miter"
-                ShapeEntity.ShapeStyle.LineJoin.LineJoin_ROUND -> styles.lineJoin = "round"
+                ShapeEntity.ShapeStyle.LineJoin.LineJoin_BEVEL -> {
+                    styles.lineJoin = "bevel"
+                    styles.paintJoin = Paint.Join.BEVEL
+                }
+                ShapeEntity.ShapeStyle.LineJoin.LineJoin_ROUND -> {
+                    styles.lineJoin = "round"
+                    styles.paintJoin = Paint.Join.ROUND
+                }
+                else -> {
+                    styles.lineJoin = "miter"
+                    styles.paintJoin = Paint.Join.MITER
+                }
             }
             styles.miterLimit = it.miterLimit.toInt()
             styles.lineDash = floatArrayOf(it.lineDashI, it.lineDashII, it.lineDashIII)

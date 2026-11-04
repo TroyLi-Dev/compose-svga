@@ -12,8 +12,14 @@ object SvgaDiskCache {
 
     private var cacheDir: File? = null
     private val HEX_CHARS = "0123456789abcdef".toCharArray()
+    private val md5ThreadLocal = object : ThreadLocal<MessageDigest>() {
+        override fun initialValue(): MessageDigest {
+            return MessageDigest.getInstance("MD5")
+        }
+    }
 
     fun init(context: Context) {
+        if (cacheDir != null) return
         val root = context.cacheDir ?: context.filesDir
         cacheDir = File(root, "svga_cache").apply {
             if (!exists()) mkdirs()
@@ -37,7 +43,8 @@ object SvgaDiskCache {
 
     fun buildCacheKey(str: String): String {
         return try {
-            val md = MessageDigest.getInstance("MD5")
+            val md = md5ThreadLocal.get() ?: MessageDigest.getInstance("MD5")
+            md.reset()
             md.update(str.toByteArray(Charsets.UTF_8))
             val digest = md.digest()
             val result = CharArray(digest.size * 2)
@@ -115,12 +122,15 @@ object SvgaDiskCache {
             val root = getCacheDir()
             if (!root.exists() || !root.isDirectory) return
             val dirs = root.listFiles()?.filter { it.isDirectory && it.name != "audios" } ?: return
-            var totalSize = dirs.sumOf { dir -> dir.walkTopDown().filter { it.isFile }.sumOf { it.length() } }
+            val dirSizes = dirs.associateWith { dir ->
+                dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+            }
+            var totalSize = dirSizes.values.sum()
             if (totalSize > maxBytes) {
                 val sortedDirs = dirs.sortedBy { it.lastModified() }
                 val targetSize = (maxBytes * 0.75).toLong()
                 for (dir in sortedDirs) {
-                    val dirSize = dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+                    val dirSize = dirSizes[dir] ?: 0L
                     dir.deleteRecursively()
                     totalSize -= dirSize
                     if (totalSize <= targetSize) break

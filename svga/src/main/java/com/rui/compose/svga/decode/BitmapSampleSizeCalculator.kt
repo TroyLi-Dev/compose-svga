@@ -5,7 +5,8 @@ import android.graphics.BitmapFactory
 object BitmapSampleSizeCalculator {
 
     fun calculate(options: BitmapFactory.Options, reqWidth: Int, reqHeight: Int): Int {
-        val (height: Int, width: Int) = options.run { outHeight to outWidth }
+        val height = options.outHeight
+        val width = options.outWidth
         var inSampleSize = 1
 
         if (reqHeight <= 0 || reqWidth <= 0 || height <= 0 || width <= 0) {

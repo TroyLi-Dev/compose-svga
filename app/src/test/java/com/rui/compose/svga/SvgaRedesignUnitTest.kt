@@ -589,4 +589,98 @@ class SvgaRedesignUnitTest {
         dynamic.clear()
         assertFalse(dynamic.hasDynamicText())
     }
+
+    @Test
+    fun testSvgaRectEmptyConstant() {
+        val empty = com.rui.compose.svga.utils.SvgaRect.EMPTY
+        assertEquals(0.0, empty.x, 0.0)
+        assertEquals(0.0, empty.y, 0.0)
+        assertEquals(0.0, empty.width, 0.0)
+        assertEquals(0.0, empty.height, 0.0)
+
+        val frameProto = com.rui.compose.svga.proto.FrameEntity(
+            layout = com.rui.compose.svga.proto.Layout(0f, 0f, 0f, 0f)
+        )
+        val frame = com.rui.compose.svga.entity.SvgaVideoSpriteFrameEntity(frameProto)
+        assertTrue(frame.layout === empty)
+    }
+
+    @Test
+    fun testSvgaScaleInfoScaleMatrix() {
+        val scaleInfo = com.rui.compose.svga.drawer.SvgaScaleInfo()
+        scaleInfo.performScaleType(
+            canvasWidth = 100f,
+            canvasHeight = 200f,
+            videoWidth = 100f,
+            videoHeight = 100f,
+            scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+        )
+        assertEquals(1.0f, scaleInfo.scaleFx, 0.001f)
+        assertEquals(1.0f, scaleInfo.scaleFy, 0.001f)
+        assertEquals(50.0f, scaleInfo.tranFy, 0.001f)
+        assertNotNull(scaleInfo.scaleMatrix)
+    }
+
+    @Test
+    fun testSvgaVideoEntityHasMatte() {
+        val nonMatteProto = com.rui.compose.svga.proto.MovieEntity(
+            sprites = listOf(
+                com.rui.compose.svga.proto.SpriteEntity(imageKey = "img_1.png"),
+                com.rui.compose.svga.proto.SpriteEntity(imageKey = "img_2.png")
+            )
+        )
+        val videoNonMatte = com.rui.compose.svga.entity.SvgaVideoEntity(nonMatteProto, java.io.File("/tmp"))
+        assertFalse(videoNonMatte.hasMatte)
+
+        val matteProto = com.rui.compose.svga.proto.MovieEntity(
+            sprites = listOf(
+                com.rui.compose.svga.proto.SpriteEntity(imageKey = "img_1.png"),
+                com.rui.compose.svga.proto.SpriteEntity(imageKey = "img_mask.matte")
+            )
+        )
+        val videoMatte = com.rui.compose.svga.entity.SvgaVideoEntity(matteProto, java.io.File("/tmp"))
+        assertTrue(videoMatte.hasMatte)
+    }
+
+    @Test
+    fun testShapeStylesPaintCapAndJoin() {
+        val proto = com.rui.compose.svga.proto.ShapeEntity(
+            type = com.rui.compose.svga.proto.ShapeEntity.ShapeType.SHAPE,
+            styles = com.rui.compose.svga.proto.ShapeEntity.ShapeStyle(
+                strokeWidth = 3f,
+                lineCap = com.rui.compose.svga.proto.ShapeEntity.ShapeStyle.LineCap.LineCap_SQUARE,
+                lineJoin = com.rui.compose.svga.proto.ShapeEntity.ShapeStyle.LineJoin.LineJoin_ROUND
+            )
+        )
+        val shapeFromProto = com.rui.compose.svga.entity.SvgaVideoShapeEntity(proto)
+        assertEquals(android.graphics.Paint.Cap.SQUARE, shapeFromProto.styles?.paintCap)
+        assertEquals(android.graphics.Paint.Join.ROUND, shapeFromProto.styles?.paintJoin)
+    }
+
+    @Test
+    fun testMd5CacheKeyConcurrentSafety() {
+        val executor = java.util.concurrent.Executors.newFixedThreadPool(8)
+        val futures = (1..100).map { i ->
+            executor.submit(java.util.concurrent.Callable {
+                val input = "concurrent_key_test_$i"
+                val key = SvgaDiskCache.buildCacheKey(input)
+                val md = MessageDigest.getInstance("MD5")
+                val expectedHex = md.digest(input.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+                assertEquals(expectedHex, key)
+            })
+        }
+        futures.forEach { it.get() }
+        executor.shutdown()
+    }
+
+    @Test
+    fun testEmptyDynamicEntitySingleton() {
+        val empty1 = com.rui.compose.svga.drawer.EMPTY_DYNAMIC_ENTITY
+        val empty2 = com.rui.compose.svga.drawer.EMPTY_DYNAMIC_ENTITY
+        assertTrue(empty1 === empty2)
+        assertFalse(empty1.hasDynamicText())
+        assertTrue(empty1.dynamicImage.isEmpty())
+        assertTrue(empty1.dynamicHidden.isEmpty())
+        assertTrue(empty1.dynamicDrawer.isEmpty())
+    }
 }

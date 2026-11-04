@@ -17,7 +17,7 @@ import com.rui.compose.svga.entity.SvgaVideoEntity
  */
 open class SvgaDrawable(
     val videoEntity: SvgaVideoEntity,
-    val dynamicEntity: SvgaDynamicEntity = SvgaDynamicEntity()
+    val dynamicEntity: SvgaDynamicEntity = com.rui.compose.svga.drawer.EMPTY_DYNAMIC_ENTITY
 ) : Drawable() {
 
     /** 兼容历史属性名称 */
@@ -78,8 +78,12 @@ open class SvgaDrawable(
         } else {
             canvas.save()
         }
+        val boundsLeft = bounds.left.toFloat()
+        val boundsTop = bounds.top.toFloat()
         try {
-            canvas.translate(bounds.left.toFloat(), bounds.top.toFloat())
+            if (boundsLeft != 0f || boundsTop != 0f) {
+                canvas.translate(boundsLeft, boundsTop)
+            }
             drawer.drawFrame(canvas, currentFrame, scaleType, w, h)
         } finally {
             canvas.restoreToCount(saveCount)

@@ -65,6 +65,8 @@ class SvgaVideoEntity {
         }
 
     internal var spriteList: List<SvgaVideoSpriteEntity> = emptyList()
+    var hasMatte: Boolean = false
+        internal set
     internal var audioList: List<SvgaAudioEntity> = emptyList()
     internal var soundPool: SoundPool? = null
     private var soundCallback: SvgaSoundCallback? = null
@@ -205,7 +207,7 @@ class SvgaVideoEntity {
         imgJson.keys().forEach { imgKey ->
             val filePath = resolveBitmapFilePath(imgJson[imgKey].toString(), imgKey)
             if (filePath.isNotEmpty()) {
-                val bitmapKey = imgKey.replace(".matte", "")
+                val bitmapKey = if (imgKey.endsWith(".matte")) imgKey.removeSuffix(".matte") else imgKey
                 createBitmap(filePath)?.let { bmp ->
                     imageMap[imgKey] = bmp
                     if (bitmapKey != imgKey) {
@@ -235,13 +237,13 @@ class SvgaVideoEntity {
         )
     }
 
-    private fun isAudioData(imageKey: String, byteArray: ByteArray, audioKeys: Set<String>): Boolean {
+    private fun isAudioData(imageKey: String, byteString: okio.ByteString, audioKeys: Set<String>): Boolean {
         if (audioKeys.contains(imageKey)) return true
-        if (byteArray.size < 4) return false
-        val b0 = byteArray[0].toInt() and 0xFF
-        val b1 = byteArray[1].toInt() and 0xFF
-        val b2 = byteArray[2].toInt() and 0xFF
-        val b3 = byteArray[3].toInt() and 0xFF
+        if (byteString.size < 4) return false
+        val b0 = byteString[0].toInt() and 0xFF
+        val b1 = byteString[1].toInt() and 0xFF
+        val b2 = byteString[2].toInt() and 0xFF
+        val b3 = byteString[3].toInt() and 0xFF
         // ID3v2 头部: "ID3"
         if (b0 == 0x49 && b1 == 0x44 && b2 == 0x33) return true
         // MPEG 同步字: 11 bits 全部置 1 (0xFFE0) 适配所有比特率与采样率的 MP3 裸流
@@ -253,31 +255,60 @@ class SvgaVideoEntity {
         return false
     }
 
+    private fun isImageBytes(byteString: okio.ByteString): Boolean {
+        if (byteString.size < 4) return false
+        val b0 = byteString[0].toInt() and 0xFF
+        val b1 = byteString[1].toInt() and 0xFF
+        val b2 = byteString[2].toInt() and 0xFF
+        val b3 = byteString[3].toInt() and 0xFF
+        // PNG: 89 50 4E 47
+        if (b0 == 0x89 && b1 == 0x50 && b2 == 0x4E && b3 == 0x47) return true
+        // JPEG: FF D8 FF
+        if (b0 == 0xFF && b1 == 0xD8 && b2 == 0xFF) return true
+        // WebP: RIFF...WEBP
+        if (b0 == 0x52 && b1 == 0x49 && b2 == 0x46 && b3 == 0x46 && byteString.size >= 12) {
+            val b8 = byteString[8].toInt() and 0xFF
+            val b9 = byteString[9].toInt() and 0xFF
+            val b10 = byteString[10].toInt() and 0xFF
+            val b11 = byteString[11].toInt() and 0xFF
+            if (b8 == 0x57 && b9 == 0x45 && b10 == 0x42 && b11 == 0x50) return true
+        }
+        // GIF: GIF8
+        if (b0 == 0x47 && b1 == 0x49 && b2 == 0x46 && b3 == 0x38) return true
+        return false
+    }
+
     private fun parseImages(obj: MovieEntity) {
-        val audioKeys = obj.audios.mapNotNull { it.audioKey }.toSet()
+        val audioKeys = if (obj.audios.isEmpty()) emptySet() else obj.audios.mapNotNull { it.audioKey }.toSet()
         obj.images.entries.forEach { entry ->
-            val byteArray = entry.value.toByteArray()
-            if (byteArray.size < 4) return@forEach
+            val byteString = entry.value
+            if (byteString.size < 4) return@forEach
             // 过滤音频数据，避免将音频字节流误解析为位图引发解码报错
-            if (isAudioData(entry.key, byteArray, audioKeys)) {
+            if (isAudioData(entry.key, byteString, audioKeys)) {
                 return@forEach
             }
-            val bitmap = SvgaBitmapByteArrayDecoder.decodeBitmapFrom(
-                byteArray,
-                frameWidth,
-                frameHeight,
-                needCutBitmap = needCutBitmap
-            ) ?: run {
-                // 仅当直接内存解码失败时，作为降级策略才尝试从缓存目录解析关联文件
-                val imgName = try { entry.value.utf8() } catch (_: Exception) { "" }
+            val bitmap = if (isImageBytes(byteString)) {
+                val byteArray = byteString.toByteArray()
+                SvgaBitmapByteArrayDecoder.decodeBitmapFrom(
+                    byteArray,
+                    frameWidth,
+                    frameHeight,
+                    needCutBitmap = needCutBitmap
+                ) ?: run {
+                    val imgName = try { byteString.utf8() } catch (_: Exception) { "" }
+                    val filePath = resolveBitmapFilePath(imgName, entry.key)
+                    createBitmap(filePath)
+                }
+            } else {
+                val imgName = try { byteString.utf8() } catch (_: Exception) { "" }
                 val filePath = resolveBitmapFilePath(imgName, entry.key)
                 createBitmap(filePath)
             }
 
-            val bitmapKey = entry.key.replace(".matte", "")
+            val bitmapKey = if (entry.key.endsWith(".matte")) entry.key.removeSuffix(".matte") else entry.key
             bitmap?.let { bmp ->
                 imageMap[entry.key] = bmp
-                if (bitmapKey != entry.key) {
+                if (bitmapKey !== entry.key) {
                     imageMap[bitmapKey] = bmp
                 }
             }
@@ -294,12 +325,46 @@ class SvgaVideoEntity {
             }
         }
         spriteList = list
+        initSpritesMetadata()
     }
 
     private fun resetSprites(entity: MovieEntity) {
         spriteList = entity.sprites.map {
             SvgaVideoSpriteEntity(it)
         }
+        initSpritesMetadata()
+    }
+
+    private fun initSpritesMetadata() {
+        var matteFound = false
+        val sprites = spriteList
+        val count = sprites.size
+        for (i in 0 until count) {
+            val sprite = sprites[i]
+            if (sprite.isMatte || sprite.matteKey != null) {
+                matteFound = true
+            }
+            val bKey = sprite.bitmapKey ?: sprite.imageKey
+            if (bKey != null) {
+                sprite.defaultBitmap = imageMap[bKey]
+                    ?: (if (sprite.noExtBitmapKey != null) imageMap[sprite.noExtBitmapKey] else null)
+                    ?: (if (sprite.noExtKey != null) imageMap[sprite.noExtKey] else null)
+                    ?: (if (sprite.imageKey != null) imageMap[sprite.imageKey] else null)
+            }
+            // Pre-build vector shape & mask paths in background thread so UI draw thread never janks
+            val dummyPath = android.graphics.Path()
+            val frames = sprite.frames
+            val frameCount = frames.size
+            for (f in 0 until frameCount) {
+                frames[f].maskPath?.buildPath(dummyPath)
+                val shapes = frames[f].shapes
+                val shapeCount = shapes.size
+                for (s in 0 until shapeCount) {
+                    shapes[s].buildPath()
+                }
+            }
+        }
+        hasMatte = matteFound
     }
 
     private var audioTimeoutRunnable: Runnable? = null
@@ -433,12 +498,11 @@ class SvgaVideoEntity {
 
     private fun generateAudioMap(entity: MovieEntity): HashMap<String, ByteArray> {
         val audiosDataMap = HashMap<String, ByteArray>()
-        val audioKeys = entity.audios.mapNotNull { it.audioKey }.toSet()
+        val audioKeys = if (entity.audios.isEmpty()) emptySet() else entity.audios.mapNotNull { it.audioKey }.toSet()
         entity.images.entries.forEach {
             val imageKey = it.key
-            val byteArray = it.value.toByteArray()
-            if (isAudioData(imageKey, byteArray, audioKeys)) {
-                audiosDataMap[imageKey] = byteArray
+            if (isAudioData(imageKey, it.value, audioKeys)) {
+                audiosDataMap[imageKey] = it.value.toByteArray()
             }
         }
         return audiosDataMap

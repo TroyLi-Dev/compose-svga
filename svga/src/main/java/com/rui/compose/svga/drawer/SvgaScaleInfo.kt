@@ -1,5 +1,6 @@
 package com.rui.compose.svga.drawer
 
+import android.graphics.Matrix
 import android.widget.ImageView
 
 class SvgaScaleInfo {
@@ -10,6 +11,7 @@ class SvgaScaleInfo {
     var scaleFy: Float = 1.0f
     var ratio: Float = 1.0f
     var ratioX: Boolean = false
+    val scaleMatrix = Matrix()
 
     private fun resetVar() {
         tranFx = 0.0f
@@ -18,7 +20,14 @@ class SvgaScaleInfo {
         scaleFy = 1.0f
         ratio = 1.0f
         ratioX = false
+        scaleMatrix.reset()
     }
+
+    private var lastCanvasWidth = -1f
+    private var lastCanvasHeight = -1f
+    private var lastVideoWidth = -1f
+    private var lastVideoHeight = -1f
+    private var lastScaleType: ImageView.ScaleType? = null
 
     fun performScaleType(
         canvasWidth: Float,
@@ -27,6 +36,20 @@ class SvgaScaleInfo {
         videoHeight: Float,
         scaleType: ImageView.ScaleType
     ) {
+        if (canvasWidth == lastCanvasWidth &&
+            canvasHeight == lastCanvasHeight &&
+            videoWidth == lastVideoWidth &&
+            videoHeight == lastVideoHeight &&
+            scaleType == lastScaleType
+        ) {
+            return
+        }
+        lastCanvasWidth = canvasWidth
+        lastCanvasHeight = canvasHeight
+        lastVideoWidth = videoWidth
+        lastVideoHeight = videoHeight
+        lastScaleType = scaleType
+
         resetVar()
         if (!canvasWidth.isFinite() || !canvasHeight.isFinite() || !videoWidth.isFinite() || !videoHeight.isFinite() ||
             canvasWidth <= 0.0f || canvasHeight <= 0.0f || videoWidth <= 0.0f || videoHeight <= 0.0f) {
@@ -145,5 +168,7 @@ class SvgaScaleInfo {
                 scaleFy = canWDVidW
             }
         }
+        scaleMatrix.setScale(scaleFx, scaleFy)
+        scaleMatrix.postTranslate(tranFx, tranFy)
     }
 }

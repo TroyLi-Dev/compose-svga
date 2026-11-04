@@ -18,6 +18,17 @@ class SvgaMemoryCalculator private constructor() {
         private const val DEFAULT_MEMORY_THRESHOLD: Long = 2048000000L // 2048MB
         private const val AVAILABLE_MEMORY_THRESHOLD: Float = 0.95F
 
+        private const val MEMORY_CACHE_VALID_MS = 500L
+
+        @Volatile
+        private var lastAvailableMemQueryTime = 0L
+
+        @Volatile
+        private var cachedAvailableMem = -1L
+
+        private val memoryInfoLock = Any()
+        private val reusableMemoryInfo = ActivityManager.MemoryInfo()
+
         @JvmStatic
         var activityManager: ActivityManager? = null
 
@@ -50,17 +61,25 @@ class SvgaMemoryCalculator private constructor() {
 
         @JvmStatic
         fun getAvailableMemoryBytes(): Long {
-            var availableMem = -1L
-            activityManager?.let {
-                try {
-                    val memoryInfo = ActivityManager.MemoryInfo()
-                    it.getMemoryInfo(memoryInfo)
-                    if (memoryInfo.totalMem > VALID_MIN_MEMORY_SIZE) {
-                        availableMem = memoryInfo.availMem
-                    }
-                } catch (_: Throwable) {}
+            val now = android.os.SystemClock.uptimeMillis()
+            if (now - lastAvailableMemQueryTime < MEMORY_CACHE_VALID_MS && cachedAvailableMem != -1L) {
+                return cachedAvailableMem
             }
-            return availableMem
+            synchronized(memoryInfoLock) {
+                if (now - lastAvailableMemQueryTime < MEMORY_CACHE_VALID_MS && cachedAvailableMem != -1L) {
+                    return cachedAvailableMem
+                }
+                activityManager?.let { am ->
+                    try {
+                        am.getMemoryInfo(reusableMemoryInfo)
+                        if (reusableMemoryInfo.totalMem > VALID_MIN_MEMORY_SIZE) {
+                            cachedAvailableMem = reusableMemoryInfo.availMem
+                            lastAvailableMemQueryTime = now
+                        }
+                    } catch (_: Throwable) {}
+                }
+            }
+            return cachedAvailableMem
         }
 
         @JvmStatic

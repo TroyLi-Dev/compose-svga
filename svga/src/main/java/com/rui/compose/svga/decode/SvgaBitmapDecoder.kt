@@ -14,6 +14,8 @@ abstract class SvgaBitmapDecoder<T> {
     ): Bitmap? {
         return try {
             BitmapFactory.Options().run {
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+                inMutable = false
                 if (reqWidth > 0 && reqHeight > 0) {
                     inJustDecodeBounds = true
                     onDecode(data, this)

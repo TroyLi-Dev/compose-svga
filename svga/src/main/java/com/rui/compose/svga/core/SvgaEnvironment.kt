@@ -32,8 +32,11 @@ val LocalSvgaClock = staticCompositionLocalOf<State<Long>> { SvgaEnvironment.tic
 internal object SvgaEnvironment {
     val tickState = mutableLongStateOf(System.nanoTime())
     val loadState = mutableStateOf(SystemLoad())
+    @Volatile
+    var currentFps: Int = 60
+        private set
 
-    private val listeners = CopyOnWriteArraySet<TickListener>()
+    private val listeners = ArrayList<TickListener>()
     @Volatile
     private var listenerArray = emptyArray<TickListener>()
 
@@ -66,8 +69,6 @@ internal object SvgaEnvironment {
                 return // 无活跃监听，彻底休眠
             }
 
-            tickState.longValue = frameTimeNanos
-
             for (i in 0 until len) {
                 try {
                     array[i].onTick(frameTimeNanos)
@@ -84,6 +85,7 @@ internal object SvgaEnvironment {
             } else if (frameTimeNanos - lastFpsTime >= 1_000_000_000L) {
                 val elapsedSeconds = (frameTimeNanos - lastFpsTime).toDouble() / 1_000_000_000.0
                 val calculatedFps = (frameCount / elapsedSeconds).toInt()
+                currentFps = calculatedFps
                 loadState.value = SystemLoad(currentFps = calculatedFps)
                 frameCount = 0
                 lastFpsTime = frameTimeNanos
@@ -98,25 +100,26 @@ internal object SvgaEnvironment {
 
     @Synchronized
     fun addListener(listener: TickListener): Boolean {
-        val added = listeners.add(listener)
-        if (added) {
+        if (!listeners.contains(listener)) {
+            listeners.add(listener)
             listenerArray = listeners.toTypedArray()
+            ensureChoreographerScheduled()
+            return true
         }
-        ensureChoreographerScheduled()
-        return added
+        return false
     }
 
     @Synchronized
     fun removeListener(listener: TickListener): Boolean {
         val removed = listeners.remove(listener)
         if (removed) {
-            listenerArray = listeners.toTypedArray()
-        }
-        if (listeners.isEmpty() && isChoreographerScheduled) {
-            if (Looper.myLooper() == Looper.getMainLooper()) {
-                unscheduleChoreographerInternal()
-            } else {
-                mainHandler.post(unscheduleRunnable)
+            listenerArray = if (listeners.isEmpty()) emptyArray() else listeners.toTypedArray()
+            if (listeners.isEmpty() && isChoreographerScheduled) {
+                if (Looper.myLooper() == Looper.getMainLooper()) {
+                    unscheduleChoreographerInternal()
+                } else {
+                    mainHandler.post(unscheduleRunnable)
+                }
             }
         }
         return removed
