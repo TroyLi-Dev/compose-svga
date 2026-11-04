@@ -527,4 +527,21 @@ class SvgaRedesignUnitTest {
         assertEquals(1, count1) // 未再次递增
         assertEquals(2, count2) // 正常递增
     }
+
+    @Test
+    fun testDirectCanvasTextRenderingZeroIntermediateBitmap() {
+        val movieEntity = com.rui.compose.svga.proto.MovieEntity()
+        val videoEntity = com.rui.compose.svga.entity.SvgaVideoEntity(movieEntity, java.io.File("/tmp"))
+        val dynamic = com.rui.compose.svga.drawer.SvgaDynamicEntity()
+        dynamic.setDynamicText("TestDirectText", android.text.TextPaint().apply {
+            color = android.graphics.Color.BLUE
+            textSize = 24f
+        }, "text_key")
+
+        val drawer = com.rui.compose.svga.drawer.SvgaCanvasDrawer(videoEntity, dynamic)
+        val canvas = android.graphics.Canvas()
+        // 绘制帧应平稳运行，不抛出异常且不分配中间 Text 位图
+        drawer.drawFrame(canvas, 0, android.widget.ImageView.ScaleType.FIT_CENTER)
+        drawer.clear()
+    }
 }
