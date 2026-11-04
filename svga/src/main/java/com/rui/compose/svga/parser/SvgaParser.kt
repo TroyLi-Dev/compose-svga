@@ -163,9 +163,8 @@ class SvgaParser(
                 return null
             }
             is String -> {
-                val lower = model.lowercase()
                 return when {
-                    lower.startsWith("http://") || lower.startsWith("https://") -> {
+                    model.startsWith("http://", ignoreCase = true) || model.startsWith("https://", ignoreCase = true) -> {
                         try {
                             decodeFromURL(URL(model), callback)
                         } catch (e: Exception) {
@@ -173,7 +172,7 @@ class SvgaParser(
                             null
                         }
                     }
-                    lower.startsWith("file://") -> {
+                    model.startsWith("file://", ignoreCase = true) -> {
                         val file = File(model.substring(7))
                         decodeFromFile(file, callback)
                         null

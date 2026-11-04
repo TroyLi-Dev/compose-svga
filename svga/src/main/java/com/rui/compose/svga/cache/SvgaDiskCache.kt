@@ -73,13 +73,16 @@ object SvgaDiskCache {
             is File -> buildCacheKey("file://${model.absolutePath}")
             is Int -> buildCacheKey("rawres://$model")
             is String -> {
-                val lower = model.lowercase()
                 when {
-                    lower.startsWith("http://") || lower.startsWith("https://") -> buildCacheKey(model)
-                    lower.startsWith("file://") -> buildCacheKey(model)
+                    model.startsWith("http://", ignoreCase = true) || model.startsWith("https://", ignoreCase = true) -> buildCacheKey(model)
+                    model.startsWith("file://", ignoreCase = true) -> buildCacheKey(model)
                     model.startsWith("/") -> buildCacheKey("file://$model")
-                    lower.startsWith("assets://") || lower.startsWith("asset://") -> {
-                        val clean = model.removePrefix("assets://").removePrefix("asset://").removePrefix("/")
+                    model.startsWith("assets://", ignoreCase = true) -> {
+                        val clean = model.substring(9).removePrefix("/")
+                        buildCacheKey("assets://$clean")
+                    }
+                    model.startsWith("asset://", ignoreCase = true) -> {
+                        val clean = model.substring(8).removePrefix("/")
                         buildCacheKey("assets://$clean")
                     }
                     else -> buildCacheKey("assets://$model")

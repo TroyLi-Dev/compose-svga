@@ -67,8 +67,12 @@ class SvgaCanvasDrawer(
                 }
             }
 
-            val drawWidth = (overrideWidth ?: canvas.width.toFloat()).coerceAtLeast(1f)
-            val drawHeight = (overrideHeight ?: canvas.height.toFloat()).coerceAtLeast(1f)
+            val drawWidth = if (videoItem.hasMatte) {
+                (overrideWidth ?: canvas.width.toFloat()).coerceAtLeast(1f)
+            } else 0f
+            val drawHeight = if (videoItem.hasMatte) {
+                (overrideHeight ?: canvas.height.toFloat()).coerceAtLeast(1f)
+            } else 0f
 
             for (index in 0 until spriteCount) {
                 val svgaDrawerSprite = sprites[index]
@@ -317,7 +321,9 @@ class SvgaCanvasDrawer(
             val c = canvas.save()
             val path = this.sharedValues.sharedPath()
             maskPath.buildPath(path)
-            path.transform(frameMatrix)
+            if (!frameMatrix.isIdentity) {
+                path.transform(frameMatrix)
+            }
             canvas.clipPath(path)
             c
         } else {
@@ -512,7 +518,9 @@ class SvgaCanvasDrawer(
             val count = canvas.save()
             val path2 = this.sharedValues.sharedPath2()
             maskPath.buildPath(path2)
-            path2.transform(frameMatrix)
+            if (!frameMatrix.isIdentity) {
+                path2.transform(frameMatrix)
+            }
             canvas.clipPath(path2)
             count
         } else {
@@ -540,18 +548,23 @@ class SvgaCanvasDrawer(
 
                     if (!hasFill && !hasStroke) return@let
 
-                    paint.alpha = alpha
-                    val path = this.sharedValues.sharedPath()
-                    path.set(shapePath)
-                    val targetMatrix = if (shape.transform != null) {
+                    val shapeTransform = shape.transform
+                    val targetMatrix = if (shapeTransform != null && !shapeTransform.isIdentity) {
                         val shapeMatrix = this.sharedValues.sharedMatrix2()
-                        shapeMatrix.set(shape.transform)
+                        shapeMatrix.set(shapeTransform)
                         shapeMatrix.postConcat(frameMatrix)
                         shapeMatrix
                     } else {
                         frameMatrix
                     }
-                    path.transform(targetMatrix)
+                    val path = if (targetMatrix.isIdentity) {
+                        shapePath
+                    } else {
+                        val p = this.sharedValues.sharedPath()
+                        p.set(shapePath)
+                        p.transform(targetMatrix)
+                        p
+                    }
 
                     if (hasFill) {
                         paint.style = Paint.Style.FILL
@@ -644,7 +657,9 @@ class SvgaCanvasDrawer(
                 sprite.frameEntity.maskPath?.let { maskPath ->
                     val path = this.sharedValues.sharedPath()
                     maskPath.buildPath(path)
-                    path.transform(frameMatrix)
+                    if (!frameMatrix.isIdentity) {
+                        path.transform(frameMatrix)
+                    }
                     canvas.clipPath(path)
                 }
                 canvas.concat(frameMatrix)
@@ -661,7 +676,9 @@ class SvgaCanvasDrawer(
                 sprite.frameEntity.maskPath?.let { maskPath ->
                     val path = this.sharedValues.sharedPath()
                     maskPath.buildPath(path)
-                    path.transform(frameMatrix)
+                    if (!frameMatrix.isIdentity) {
+                        path.transform(frameMatrix)
+                    }
                     canvas.clipPath(path)
                 }
                 canvas.concat(frameMatrix)

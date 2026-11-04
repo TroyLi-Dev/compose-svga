@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -58,6 +59,40 @@ internal val DEFAULT_ON_SUCCESS: (SvgaVideoEntity) -> Unit = {}
 internal val DEFAULT_ON_ERROR: (Throwable) -> Unit = {}
 
 private class ComponentSizeRef(var width: Int = 0, var height: Int = 0)
+
+private class AnimationCallbacks(
+    var onLoading: () -> Unit,
+    var onPlay: () -> Unit,
+    var onSuccess: (SvgaVideoEntity) -> Unit,
+    var onError: (Throwable) -> Unit,
+    var onStep: (frame: Int, percentage: Double) -> Unit,
+    var onFinished: () -> Unit
+)
+
+private val lifecycleStateCache = java.util.WeakHashMap<Lifecycle, MutableState<Boolean>>()
+
+@Composable
+private fun rememberLifecycleIsStarted(lifecycleOwner: androidx.lifecycle.LifecycleOwner): androidx.compose.runtime.State<Boolean> {
+    val lifecycle = lifecycleOwner.lifecycle
+    return remember(lifecycle) {
+        synchronized(lifecycleStateCache) {
+            lifecycleStateCache.getOrPut(lifecycle) {
+                val state = mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
+                lifecycle.addObserver(LifecycleEventObserver { _, event ->
+                    when (event) {
+                        Lifecycle.Event.ON_START -> state.value = true
+                        Lifecycle.Event.ON_STOP -> state.value = false
+                        Lifecycle.Event.ON_DESTROY -> synchronized(lifecycleStateCache) {
+                            lifecycleStateCache.remove(lifecycle)
+                        }
+                        else -> {}
+                    }
+                })
+                state
+            }
+        }
+    }
+}
 
 private class AnimationTimeline(
     var accumulatedTimeNanos: Long = 0L,
@@ -151,28 +186,17 @@ fun SvgaAnimation(
     val componentSize = remember { ComponentSizeRef() }
 
     val lifecycleOwner = LocalLifecycleOwner.current
-    var isStarted by remember {
-        mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
-    }
+    val isStarted by rememberLifecycleIsStarted(lifecycleOwner)
 
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_START -> isStarted = true
-                Lifecycle.Event.ON_STOP -> isStarted = false
-                else -> {}
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    val callbacks = remember {
+        AnimationCallbacks(onLoading, onPlay, onSuccess, onError, onStep, onFinished)
     }
-
-    val currentOnLoading by rememberUpdatedState(onLoading)
-    val currentOnPlay by rememberUpdatedState(onPlay)
-    val currentOnSuccess by rememberUpdatedState(onSuccess)
-    val currentOnError by rememberUpdatedState(onError)
-    val currentOnStep by rememberUpdatedState(onStep)
-    val currentOnFinished by rememberUpdatedState(onFinished)
+    callbacks.onLoading = onLoading
+    callbacks.onPlay = onPlay
+    callbacks.onSuccess = onSuccess
+    callbacks.onError = onError
+    callbacks.onStep = onStep
+    callbacks.onFinished = onFinished
 
     val cacheKey = remember(model) {
         SvgaDiskCache.buildCacheKeyForModel(model)
@@ -220,8 +244,8 @@ fun SvgaAnimation(
             if (controller?.playState != SvgaPlayState.Paused && controller?.playState != SvgaPlayState.Idle) {
                 controller?.playState = SvgaPlayState.Playing
             }
-            currentOnSuccess(cached)
-            currentOnPlay()
+            callbacks.onSuccess(cached)
+            callbacks.onPlay()
             return@LaunchedEffect
         }
 
@@ -233,13 +257,13 @@ fun SvgaAnimation(
                     controller?.playState = SvgaPlayState.Playing
                 }
                 redrawTrigger++
-                currentOnSuccess(videoEntity!!)
-                currentOnPlay()
+                callbacks.onSuccess(videoEntity!!)
+                callbacks.onPlay()
             }
             return@LaunchedEffect
         }
         controller?.loadState = SvgaLoadState.Loading
-        currentOnLoading()
+        callbacks.onLoading()
         try {
             val entity = suspendCancellableCoroutine<SvgaVideoEntity> { continuation ->
                 val parser = SvgaParser(context, needCutBitmap = needCutBitmap)
@@ -265,14 +289,14 @@ fun SvgaAnimation(
                 controller?.playState = SvgaPlayState.Playing
             }
             redrawTrigger++
-            currentOnSuccess(entity)
-            currentOnPlay()
+            callbacks.onSuccess(entity)
+            callbacks.onPlay()
         } catch (e: Exception) {
             if (e !is kotlinx.coroutines.CancellationException) {
                 LogUtils.error("SvgaAnimation", "Decode failed for model: $model", e)
                 loadState = SvgaLoadState.Error
                 controller?.loadState = SvgaLoadState.Error
-                currentOnError(e)
+                callbacks.onError(e)
             }
         }
     }
@@ -408,14 +432,14 @@ fun SvgaAnimation(
                         drawFrameIndex = lastFrame
                         timeline.lastFrame = lastFrame
                         controller?.currentFrame = lastFrame
-                        if (currentOnStep !== DEFAULT_ON_STEP) {
-                            currentOnStep(lastFrame, 1.0)
+                        if (callbacks.onStep !== DEFAULT_ON_STEP) {
+                            callbacks.onStep(lastFrame, 1.0)
                         }
                     }
                     if (!isFinished) {
                         isFinished = true
                         controller?.playState = SvgaPlayState.Finished
-                        currentOnFinished()
+                        callbacks.onFinished()
                     }
                     SvgaEnvironment.removeListener(this)
                     return
@@ -438,8 +462,8 @@ fun SvgaAnimation(
                     timeline.lastFrame = currentFrame
                     drawFrameIndex = currentFrame
                     controller?.currentFrame = currentFrame
-                    if (currentOnStep !== DEFAULT_ON_STEP) {
-                        currentOnStep(currentFrame, ((currentFrame + 1).toDouble() / numFrames).coerceIn(0.0, 1.0))
+                    if (callbacks.onStep !== DEFAULT_ON_STEP) {
+                        callbacks.onStep(currentFrame, ((currentFrame + 1).toDouble() / numFrames).coerceIn(0.0, 1.0))
                     }
                 }
             }
@@ -467,13 +491,17 @@ fun SvgaAnimation(
         }
     } else Modifier
 
+    val sizeModifier = if (needCutBitmap) {
+        Modifier.onSizeChanged {
+            componentSize.width = it.width
+            componentSize.height = it.height
+        }
+    } else Modifier
+
     Box(
         modifier = modifier
             .graphicsLayer { clip = true }
-            .onSizeChanged {
-                componentSize.width = it.width
-                componentSize.height = it.height
-            }
+            .then(sizeModifier)
             .then(clickModifier),
         contentAlignment = Alignment.Center
     ) {

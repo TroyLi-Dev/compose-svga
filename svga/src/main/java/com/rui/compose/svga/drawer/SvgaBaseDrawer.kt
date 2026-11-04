@@ -45,12 +45,12 @@ abstract class SvgaBaseDrawer(val videoItem: SvgaVideoEntity) {
         for (i in 0 until size) {
             val spriteItem = list[i]
             val frames = spriteItem.frames
-            if (frameIndex in frames.indices) {
-                if (spriteItem.imageKey != null) {
-                    val frame = frames[frameIndex]
-                    if (!spriteItem.isMatte && frame.alpha <= 0.0) {
-                        continue
-                    }
+            if (frameIndex in 0 until frames.size) {
+                val frame = frames[frameIndex]
+                if (!spriteItem.isMatte && frame.alpha <= 0.0) {
+                    continue
+                }
+                if (spriteItem.imageKey != null || frame.shapes.isNotEmpty()) {
                     val drawerSprite = drawerSprites[i]
                     drawerSprite._frameEntity = frame
                     frameSpritesList.add(drawerSprite)
