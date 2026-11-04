@@ -14,13 +14,21 @@ abstract class SvgaBaseDrawer(val videoItem: SvgaVideoEntity) {
     private val spritePool = Pools.SimplePool<SvgaDrawerSprite>(max(1, videoItem.spriteList.size))
     private val frameSpritesList = ArrayList<SvgaDrawerSprite>(max(1, videoItem.spriteList.size))
 
-    inner class SvgaDrawerSprite(
+    class SvgaDrawerSprite(
         var _matteKey: String? = null,
         var _imageKey: String? = null,
+        var _bitmapKey: String? = null,
+        var _noExtKey: String? = null,
+        var _noExtBitmapKey: String? = null,
+        var _isMatte: Boolean = false,
         var _frameEntity: SvgaVideoSpriteFrameEntity? = null
     ) {
         val matteKey get() = _matteKey
         val imageKey get() = _imageKey
+        val bitmapKey get() = _bitmapKey
+        val noExtKey get() = _noExtKey
+        val noExtBitmapKey get() = _noExtBitmapKey
+        val isMatte get() = _isMatte
         val frameEntity get() = _frameEntity!!
     }
 
@@ -31,16 +39,20 @@ abstract class SvgaBaseDrawer(val videoItem: SvgaVideoEntity) {
         for (i in 0 until size) {
             val spriteItem = list[i]
             val frames = spriteItem.frames
-            if (frameIndex in 0 until frames.size) {
+            if (frameIndex >= 0 && frameIndex < frames.size) {
                 val imageKey = spriteItem.imageKey
                 if (imageKey != null) {
                     val frame = frames[frameIndex]
-                    if (!imageKey.endsWith(".matte") && frame.alpha <= 0.0) {
+                    if (!spriteItem.isMatte && frame.alpha <= 0.0) {
                         continue
                     }
                     val sprite = spritePool.acquire() ?: SvgaDrawerSprite()
                     sprite._matteKey = spriteItem.matteKey
                     sprite._imageKey = imageKey
+                    sprite._bitmapKey = spriteItem.bitmapKey
+                    sprite._noExtKey = spriteItem.noExtKey
+                    sprite._noExtBitmapKey = spriteItem.noExtBitmapKey
+                    sprite._isMatte = spriteItem.isMatte
                     sprite._frameEntity = frame
                     frameSpritesList.add(sprite)
                 }
@@ -55,6 +67,10 @@ abstract class SvgaBaseDrawer(val videoItem: SvgaVideoEntity) {
             val s = sprites[i]
             s._matteKey = null
             s._imageKey = null
+            s._bitmapKey = null
+            s._noExtKey = null
+            s._noExtBitmapKey = null
+            s._isMatte = false
             s._frameEntity = null
             try {
                 spritePool.release(s)

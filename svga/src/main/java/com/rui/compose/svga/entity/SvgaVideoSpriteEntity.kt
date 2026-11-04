@@ -10,11 +10,23 @@ class SvgaVideoSpriteEntity {
     val matteKey: String?
     val frames: List<SvgaVideoSpriteFrameEntity>
 
+    val isMatte: Boolean
+    val bitmapKey: String?
+    val noExtKey: String?
+    val noExtBitmapKey: String?
+
     constructor(obj: JSONObject) {
         val rawImageKey = obj.optString("imageKey")
-        this.imageKey = if (rawImageKey.isNotEmpty()) rawImageKey else null
+        val parsedImageKey = if (rawImageKey.isNotEmpty()) rawImageKey else null
+        this.imageKey = parsedImageKey
         val rawMatteKey = obj.optString("matteKey")
         this.matteKey = if (rawMatteKey.isNotEmpty()) rawMatteKey else null
+        val matte = parsedImageKey?.endsWith(".matte") == true
+        this.isMatte = matte
+        val bKey = if (parsedImageKey != null && matte) parsedImageKey.substring(0, parsedImageKey.length - 6) else parsedImageKey
+        this.bitmapKey = bKey
+        this.noExtKey = if (parsedImageKey != null && parsedImageKey.length > 4 && parsedImageKey.endsWith(".png", ignoreCase = true)) parsedImageKey.substring(0, parsedImageKey.length - 4) else null
+        this.noExtBitmapKey = if (bKey != null && bKey.length > 4 && bKey.endsWith(".png", ignoreCase = true)) bKey.substring(0, bKey.length - 4) else null
         val mutableFrames = mutableListOf<SvgaVideoSpriteFrameEntity>()
         obj.optJSONArray("frames")?.let { arr ->
             for (i in 0 until arr.length()) {
@@ -39,8 +51,16 @@ class SvgaVideoSpriteEntity {
     }
 
     constructor(obj: SpriteEntity) {
-        this.imageKey = if (obj.imageKey.isNotEmpty()) obj.imageKey else null
-        this.matteKey = if (obj.matteKey.isNotEmpty()) obj.matteKey else null
+        val parsedImageKey = if (obj.imageKey.isNotEmpty()) obj.imageKey else null
+        this.imageKey = parsedImageKey
+        val rawMatteKey = obj.matteKey
+        this.matteKey = if (rawMatteKey.isNotEmpty()) rawMatteKey else null
+        val matte = parsedImageKey?.endsWith(".matte") == true
+        this.isMatte = matte
+        val bKey = if (parsedImageKey != null && matte) parsedImageKey.substring(0, parsedImageKey.length - 6) else parsedImageKey
+        this.bitmapKey = bKey
+        this.noExtKey = if (parsedImageKey != null && parsedImageKey.length > 4 && parsedImageKey.endsWith(".png", ignoreCase = true)) parsedImageKey.substring(0, parsedImageKey.length - 4) else null
+        this.noExtBitmapKey = if (bKey != null && bKey.length > 4 && bKey.endsWith(".png", ignoreCase = true)) bKey.substring(0, bKey.length - 4) else null
         var lastFrame: SvgaVideoSpriteFrameEntity? = null
         frames = obj.frames.mapNotNull { frameProto ->
             try {

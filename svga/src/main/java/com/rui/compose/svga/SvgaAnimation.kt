@@ -133,6 +133,7 @@ fun SvgaAnimation(
 
     LaunchedEffect(context) {
         SvgaDiskCache.init(context)
+        com.rui.compose.svga.cache.SvgaMemoryCache.instance.init(context)
         SvgaMemoryCalculator.instance.init(context)
     }
 

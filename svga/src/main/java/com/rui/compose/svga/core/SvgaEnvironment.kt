@@ -34,6 +34,8 @@ internal object SvgaEnvironment {
     val loadState = mutableStateOf(SystemLoad())
 
     private val listeners = CopyOnWriteArraySet<TickListener>()
+    @Volatile
+    private var listenerArray = emptyArray<TickListener>()
 
     @Volatile
     private var isChoreographerScheduled = false
@@ -45,18 +47,30 @@ internal object SvgaEnvironment {
     private var lastFpsTime = 0L
     private var frameCount = 0
 
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    private val scheduleRunnable = Runnable {
+        ensureChoreographerScheduledInternal()
+    }
+
+    private val unscheduleRunnable = Runnable {
+        unscheduleChoreographerInternal()
+    }
+
     private val frameCallback = object : Choreographer.FrameCallback {
         override fun doFrame(frameTimeNanos: Long) {
             isChoreographerScheduled = false
-            if (listeners.isEmpty()) {
+            val array = listenerArray
+            val len = array.size
+            if (len == 0) {
                 return // 无活跃监听，彻底休眠
             }
 
             tickState.longValue = frameTimeNanos
 
-            for (listener in listeners) {
+            for (i in 0 until len) {
                 try {
-                    listener.onTick(frameTimeNanos)
+                    array[i].onTick(frameTimeNanos)
                 } catch (t: Throwable) {
                     com.rui.compose.svga.utils.log.LogUtils.error("SvgaEnvironment", "Error in tick listener", t)
                 }
@@ -75,7 +89,7 @@ internal object SvgaEnvironment {
                 lastFpsTime = frameTimeNanos
             }
 
-            if (listeners.isNotEmpty()) {
+            if (listenerArray.isNotEmpty()) {
                 isChoreographerScheduled = true
                 Choreographer.getInstance().postFrameCallback(this)
             }
@@ -85,45 +99,59 @@ internal object SvgaEnvironment {
     @Synchronized
     fun addListener(listener: TickListener): Boolean {
         val added = listeners.add(listener)
+        if (added) {
+            listenerArray = listeners.toTypedArray()
+        }
         ensureChoreographerScheduled()
         return added
     }
 
-    private val mainHandler = Handler(Looper.getMainLooper())
-
     @Synchronized
     fun removeListener(listener: TickListener): Boolean {
         val removed = listeners.remove(listener)
+        if (removed) {
+            listenerArray = listeners.toTypedArray()
+        }
         if (listeners.isEmpty() && isChoreographerScheduled) {
-            val unschedule = {
-                if (listeners.isEmpty() && isChoreographerScheduled) {
-                    try {
-                        Choreographer.getInstance().removeFrameCallback(frameCallback)
-                    } catch (_: Throwable) {}
-                    isChoreographerScheduled = false
-                }
+            if (Looper.myLooper() == Looper.getMainLooper()) {
+                unscheduleChoreographerInternal()
+            } else {
+                mainHandler.post(unscheduleRunnable)
             }
-            if (Looper.myLooper() == Looper.getMainLooper()) unschedule() else mainHandler.post(unschedule)
         }
         return removed
     }
 
+    private fun unscheduleChoreographerInternal() {
+        if (listeners.isEmpty() && isChoreographerScheduled) {
+            try {
+                Choreographer.getInstance().removeFrameCallback(frameCallback)
+            } catch (_: Throwable) {}
+            isChoreographerScheduled = false
+        }
+    }
+
     private fun ensureChoreographerScheduled() {
         if (listeners.isNotEmpty() && !isChoreographerScheduled) {
-            val schedule = {
-                if (listeners.isNotEmpty() && !isChoreographerScheduled) {
-                    isChoreographerScheduled = true
-                    lastFpsTime = 0L
-                    frameCount = 0
-                    try {
-                        Choreographer.getInstance().postFrameCallback(frameCallback)
-                    } catch (t: Throwable) {
-                        isChoreographerScheduled = false
-                        com.rui.compose.svga.utils.log.LogUtils.error("SvgaEnvironment", "Failed to schedule Choreographer callback", t)
-                    }
-                }
+            if (Looper.myLooper() == Looper.getMainLooper()) {
+                ensureChoreographerScheduledInternal()
+            } else {
+                mainHandler.post(scheduleRunnable)
             }
-            if (Looper.myLooper() == Looper.getMainLooper()) schedule() else mainHandler.post(schedule)
+        }
+    }
+
+    private fun ensureChoreographerScheduledInternal() {
+        if (listeners.isNotEmpty() && !isChoreographerScheduled) {
+            isChoreographerScheduled = true
+            lastFpsTime = 0L
+            frameCount = 0
+            try {
+                Choreographer.getInstance().postFrameCallback(frameCallback)
+            } catch (t: Throwable) {
+                isChoreographerScheduled = false
+                com.rui.compose.svga.utils.log.LogUtils.error("SvgaEnvironment", "Failed to schedule Choreographer callback", t)
+            }
         }
     }
 }

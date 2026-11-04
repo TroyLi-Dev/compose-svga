@@ -64,6 +64,7 @@ open class SvgaImageView @JvmOverloads constructor(
         if (!isInEditMode) {
             val appCtx = context.applicationContext ?: context
             com.rui.compose.svga.cache.SvgaDiskCache.init(appCtx)
+            com.rui.compose.svga.cache.SvgaMemoryCache.instance.init(appCtx)
             com.rui.compose.svga.utils.SvgaMemoryCalculator.instance.init(appCtx)
         }
         attrs?.let { loadAttrs(it) }
@@ -377,7 +378,7 @@ open class SvgaImageView @JvmOverloads constructor(
     override fun onVisibilityChanged(changedView: android.view.View, visibility: Int) {
         super.onVisibilityChanged(changedView, visibility)
         if (isShown) {
-            if (wasAnimatingBeforeHide && isAttachedToWindow) {
+            if (!isUserPaused && wasAnimatingBeforeHide && isAttachedToWindow) {
                 wasAnimatingBeforeHide = false
                 if (animator?.isPaused == true) {
                     animator?.resume()
@@ -400,7 +401,7 @@ open class SvgaImageView @JvmOverloads constructor(
     override fun onWindowVisibilityChanged(visibility: Int) {
         super.onWindowVisibilityChanged(visibility)
         if (visibility == VISIBLE) {
-            if (wasAnimatingBeforeHide) {
+            if (!isUserPaused && wasAnimatingBeforeHide) {
                 wasAnimatingBeforeHide = false
                 if (animator?.isPaused == true) {
                     animator?.resume()

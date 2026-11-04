@@ -42,6 +42,7 @@ class SvgaParser(
     init {
         this.context?.let { appCtx ->
             SvgaDiskCache.init(appCtx)
+            com.rui.compose.svga.cache.SvgaMemoryCache.instance.init(appCtx)
             com.rui.compose.svga.utils.SvgaMemoryCalculator.instance.init(appCtx)
         }
     }

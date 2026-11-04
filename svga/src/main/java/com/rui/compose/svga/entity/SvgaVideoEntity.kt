@@ -69,6 +69,17 @@ class SvgaVideoEntity {
     internal var soundPool: SoundPool? = null
     private var soundCallback: SvgaSoundCallback? = null
     internal var imageMap = java.util.concurrent.ConcurrentHashMap<String, Bitmap>()
+
+    val memoryByteSize: Int by lazy {
+        var size = 0
+        val visited = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Bitmap, Boolean>())
+        imageMap.values.forEach { bitmap ->
+            if (!bitmap.isRecycled && visited.add(bitmap)) {
+                size += bitmap.byteCount
+            }
+        }
+        if (size <= 0) 1024 else size
+    }
     private var cacheDir: File
     private var frameHeight = 0
     private var frameWidth = 0

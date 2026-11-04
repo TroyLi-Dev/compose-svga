@@ -544,4 +544,49 @@ class SvgaRedesignUnitTest {
         drawer.drawFrame(canvas, 0, android.widget.ImageView.ScaleType.FIT_CENTER)
         drawer.clear()
     }
+
+    @Test
+    fun testSvgaMemoryCacheTrimMemory() {
+        val cache = com.rui.compose.svga.cache.SvgaMemoryCache.instance
+        assertNull(cache.get(""))
+        @Suppress("DEPRECATION")
+        cache.trimMemory(android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL)
+        @Suppress("DEPRECATION")
+        cache.trimMemory(android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW)
+        cache.clearAllCache()
+    }
+
+    @Test
+    fun testSvgaVideoSpriteEntityPrecomputedKeys() {
+        val proto = com.rui.compose.svga.proto.SpriteEntity(
+            imageKey = "avatar.png.matte",
+            matteKey = "mask_1"
+        )
+        val sprite = com.rui.compose.svga.entity.SvgaVideoSpriteEntity(proto)
+        assertTrue(sprite.isMatte)
+        assertEquals("avatar.png", sprite.bitmapKey)
+        assertNull(sprite.noExtKey)
+        assertEquals("avatar", sprite.noExtBitmapKey)
+
+        val protoNormal = com.rui.compose.svga.proto.SpriteEntity(
+            imageKey = "gift_box.png"
+        )
+        val spriteNormal = com.rui.compose.svga.entity.SvgaVideoSpriteEntity(protoNormal)
+        assertFalse(spriteNormal.isMatte)
+        assertEquals("gift_box.png", spriteNormal.bitmapKey)
+        assertEquals("gift_box", spriteNormal.noExtKey)
+        assertEquals("gift_box", spriteNormal.noExtBitmapKey)
+    }
+
+    @Test
+    fun testSvgaDynamicEntityHasDynamicText() {
+        val dynamic = com.rui.compose.svga.drawer.SvgaDynamicEntity()
+        assertFalse(dynamic.hasDynamicText())
+
+        dynamic.setDynamicText("hello", android.text.TextPaint(), "key1")
+        assertTrue(dynamic.hasDynamicText())
+
+        dynamic.clear()
+        assertFalse(dynamic.hasDynamicText())
+    }
 }

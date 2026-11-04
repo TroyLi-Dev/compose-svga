@@ -55,23 +55,22 @@ class SvgaCanvasDrawer(
         var saveID = -1
         try {
             matteSprites.clear()
-            for (i in 0 until sprites.size) {
+            val spriteCount = sprites.size
+            for (i in 0 until spriteCount) {
                 val s = sprites[i]
-                val key = s.imageKey
-                if (key != null && key.endsWith(".matte")) {
-                    matteSprites[key] = s
+                if (s.isMatte && s.imageKey != null) {
+                    matteSprites[s.imageKey!!] = s
                 }
             }
 
             val drawWidth = (overrideWidth ?: canvas.width.toFloat()).coerceAtLeast(1f)
             val drawHeight = (overrideHeight ?: canvas.height.toFloat()).coerceAtLeast(1f)
 
-            sprites.forEachIndexed { index, svgaDrawerSprite ->
-                svgaDrawerSprite.imageKey?.let {
-                    if (it.endsWith(".matte")) {
-                        // 遮罩图层仅用于合成蒙版，不直接绘制到主画布
-                        return@forEachIndexed
-                    }
+            for (index in 0 until spriteCount) {
+                val svgaDrawerSprite = sprites[index]
+                if (svgaDrawerSprite.isMatte) {
+                    // 遮罩图层仅用于合成蒙版，不直接绘制到主画布
+                    continue
                 }
                 if (isMatteBegin(index, sprites)) {
                     if (saveID != -1) {
@@ -104,7 +103,7 @@ class SvgaCanvasDrawer(
                         try { canvas.restoreToCount(saveID) } catch (_: Throwable) {}
                         saveID = -1
                     }
-                    return@forEachIndexed
+                    continue
                 }
             }
         } finally {
@@ -117,17 +116,16 @@ class SvgaCanvasDrawer(
     }
 
     private fun isMatteBegin(spriteIndex: Int, sprites: List<SvgaDrawerSprite>): Boolean {
+        if (matteSprites.isEmpty()) return false
         val current = sprites.getOrNull(spriteIndex) ?: return false
-        val imageKey = current.imageKey
-        if (imageKey != null && imageKey.endsWith(".matte")) return false
+        if (current.isMatte) return false
         val matteKey = current.matteKey
         if (matteKey.isNullOrEmpty()) return false
 
         var prevIndex = spriteIndex - 1
         while (prevIndex >= 0) {
             val prev = sprites[prevIndex]
-            val prevKey = prev.imageKey
-            if (prevKey == null || !prevKey.endsWith(".matte")) {
+            if (!prev.isMatte) {
                 return prev.matteKey.isNullOrEmpty() || prev.matteKey != matteKey
             }
             prevIndex--
@@ -136,17 +134,16 @@ class SvgaCanvasDrawer(
     }
 
     private fun isMatteEnd(spriteIndex: Int, sprites: List<SvgaDrawerSprite>): Boolean {
+        if (matteSprites.isEmpty()) return false
         val current = sprites.getOrNull(spriteIndex) ?: return false
-        val imageKey = current.imageKey
-        if (imageKey != null && imageKey.endsWith(".matte")) return false
+        if (current.isMatte) return false
         val matteKey = current.matteKey
         if (matteKey.isNullOrEmpty()) return false
 
         var nextIndex = spriteIndex + 1
         while (nextIndex < sprites.size) {
             val next = sprites[nextIndex]
-            val nextKey = next.imageKey
-            if (nextKey == null || !nextKey.endsWith(".matte")) {
+            if (!next.isMatte) {
                 return next.matteKey.isNullOrEmpty() || next.matteKey != matteKey
             }
             nextIndex++
@@ -280,24 +277,20 @@ class SvgaCanvasDrawer(
 
     private fun drawImage(sprite: SvgaDrawerSprite, canvas: Canvas) {
         val imageKey = sprite.imageKey ?: return
-        val noExtKey = if (imageKey.length > 4 && imageKey.endsWith(".png", ignoreCase = true)) {
-            imageKey.substring(0, imageKey.length - 4)
-        } else null
-        if (dynamicItem.dynamicHidden[imageKey] == true || (noExtKey != null && dynamicItem.dynamicHidden[noExtKey] == true)) return
-
-        val bitmapKey = if (imageKey.endsWith(".matte")) {
-            imageKey.substring(0, imageKey.length - 6)
-        } else {
-            imageKey
+        val noExtKey = sprite.noExtKey
+        if (dynamicItem.dynamicHidden.isNotEmpty()) {
+            if (dynamicItem.dynamicHidden[imageKey] == true || (noExtKey != null && dynamicItem.dynamicHidden[noExtKey] == true)) return
         }
-        val noExtBitmapKey = if (bitmapKey.length > 4 && bitmapKey.endsWith(".png", ignoreCase = true)) {
-            bitmapKey.substring(0, bitmapKey.length - 4)
-        } else null
 
-        val drawingBitmap = dynamicItem.dynamicImage[bitmapKey]
-            ?: (if (noExtBitmapKey != null) dynamicItem.dynamicImage[noExtBitmapKey] else null)
-            ?: (if (noExtKey != null) dynamicItem.dynamicImage[noExtKey] else null)
-            ?: dynamicItem.dynamicImage[imageKey]
+        val bitmapKey = sprite.bitmapKey ?: imageKey
+        val noExtBitmapKey = sprite.noExtBitmapKey
+
+        val drawingBitmap = (if (dynamicItem.dynamicImage.isNotEmpty()) {
+            dynamicItem.dynamicImage[bitmapKey]
+                ?: (if (noExtBitmapKey != null) dynamicItem.dynamicImage[noExtBitmapKey] else null)
+                ?: (if (noExtKey != null) dynamicItem.dynamicImage[noExtKey] else null)
+                ?: dynamicItem.dynamicImage[imageKey]
+        } else null)
             ?: videoItem.imageMap[bitmapKey]
             ?: (if (noExtBitmapKey != null) videoItem.imageMap[noExtBitmapKey] else null)
             ?: (if (noExtKey != null) videoItem.imageMap[noExtKey] else null)
@@ -332,22 +325,26 @@ class SvgaCanvasDrawer(
                 canvas.drawBitmap(drawingBitmap, frameMatrix, paint)
             }
 
-            val clickListener = dynamicItem.dynamicClickArea[imageKey]
-                ?: (if (noExtKey != null) dynamicItem.dynamicClickArea[noExtKey] else null)
-            clickListener?.let { listener ->
-                val rect = this.sharedValues.sharedRectF()
-                rect.set(0f, 0f, drawingBitmap.width.toFloat(), drawingBitmap.height.toFloat())
-                frameMatrix.mapRect(rect)
-                listener.onResponseArea(
-                    imageKey,
-                    rect.left.toInt(),
-                    rect.top.toInt(),
-                    rect.right.toInt(),
-                    rect.bottom.toInt()
-                )
+            if (dynamicItem.dynamicClickArea.isNotEmpty()) {
+                val clickListener = dynamicItem.dynamicClickArea[imageKey]
+                    ?: (if (noExtKey != null) dynamicItem.dynamicClickArea[noExtKey] else null)
+                clickListener?.let { listener ->
+                    val rect = this.sharedValues.sharedRectF()
+                    rect.set(0f, 0f, drawingBitmap.width.toFloat(), drawingBitmap.height.toFloat())
+                    frameMatrix.mapRect(rect)
+                    listener.onResponseArea(
+                        imageKey,
+                        rect.left.toInt(),
+                        rect.top.toInt(),
+                        rect.right.toInt(),
+                        rect.bottom.toInt()
+                    )
+                }
             }
 
-            drawTextOnBitmap(canvas, drawingBitmap, sprite, frameMatrix)
+            if (dynamicItem.hasDynamicText()) {
+                drawTextOnBitmap(canvas, drawingBitmap, sprite, frameMatrix)
+            }
         } finally {
             if (count != -1) {
                 canvas.restoreToCount(count)
@@ -361,15 +358,14 @@ class SvgaCanvasDrawer(
         sprite: SvgaDrawerSprite,
         frameMatrix: Matrix
     ) {
+        if (!dynamicItem.hasDynamicText()) return
         if (drawingBitmap.width <= 0 || drawingBitmap.height <= 0) return
         if (dynamicItem.isTextDirty) {
             dynamicStaticLayoutCache.clear()
             dynamicItem.isTextDirty = false
         }
         val imageKey = sprite.imageKey ?: return
-        val noExtKey = if (imageKey.length > 4 && imageKey.endsWith(".png", ignoreCase = true)) {
-            imageKey.substring(0, imageKey.length - 4)
-        } else null
+        val noExtKey = sprite.noExtKey
 
         val drawingText = dynamicItem.dynamicText[imageKey]
             ?: (if (noExtKey != null) dynamicItem.dynamicText[noExtKey] else null)
@@ -487,7 +483,9 @@ class SvgaCanvasDrawer(
     }
 
     private fun drawShape(sprite: SvgaDrawerSprite, canvas: Canvas) {
-        if (sprite.frameEntity.shapes.isEmpty()) return
+        val shapeList = sprite.frameEntity.shapes
+        val shapeCount = shapeList.size
+        if (shapeCount == 0) return
         val frameMatrix = obtainFrameMatrix(sprite.frameEntity.transform)
         val maskPath = sprite.frameEntity.maskPath
         val saveCount = if (maskPath != null) {
@@ -501,7 +499,8 @@ class SvgaCanvasDrawer(
             -1
         }
         try {
-            sprite.frameEntity.shapes.forEach { shape ->
+            for (i in 0 until shapeCount) {
+                val shape = shapeList[i]
                 shape.buildPath()
                 shape.shapePath?.let { shapePath ->
                     val paint = this.sharedValues.sharedPaint()
@@ -598,10 +597,9 @@ class SvgaCanvasDrawer(
     }
 
     private fun drawDynamic(sprite: SvgaDrawerSprite, canvas: Canvas, frameIndex: Int) {
+        if (dynamicItem.dynamicDrawer.isEmpty() && dynamicItem.dynamicDrawerSized.isEmpty()) return
         val imageKey = sprite.imageKey ?: return
-        val noExtKey = if (imageKey.length > 4 && imageKey.endsWith(".png", ignoreCase = true)) {
-            imageKey.substring(0, imageKey.length - 4)
-        } else null
+        val noExtKey = sprite.noExtKey
         val drawer1 = dynamicItem.dynamicDrawer[imageKey]
             ?: (if (noExtKey != null) dynamicItem.dynamicDrawer[noExtKey] else null)
         val drawer2 = dynamicItem.dynamicDrawerSized[imageKey]

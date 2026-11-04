@@ -1,5 +1,9 @@
 package com.rui.compose.svga.cache
 
+import android.app.Application
+import android.content.ComponentCallbacks2
+import android.content.Context
+import android.content.res.Configuration
 import android.util.LruCache
 import com.rui.compose.svga.entity.SvgaVideoEntity
 
@@ -24,7 +28,43 @@ class SvgaMemoryCache private constructor() {
 
     private val cache = object : LruCache<String, SvgaVideoEntity>(DEFAULT_MAX_SIZE) {
         override fun sizeOf(key: String, value: SvgaVideoEntity): Int {
-            return getImageSize(value)
+            return value.memoryByteSize
+        }
+    }
+
+    @Volatile
+    private var isRegistered = false
+
+    fun init(context: Context) {
+        if (!isRegistered) {
+            val app = context.applicationContext as? Application ?: return
+            synchronized(this) {
+                if (!isRegistered) {
+                    try {
+                        app.registerComponentCallbacks(object : ComponentCallbacks2 {
+                            override fun onTrimMemory(level: Int) {
+                                trimMemory(level)
+                            }
+                            override fun onConfigurationChanged(newConfig: Configuration) {}
+                            @Deprecated("Deprecated in Java")
+                            override fun onLowMemory() {
+                                clearAllCache()
+                            }
+                        })
+                        isRegistered = true
+                    } catch (_: Throwable) {}
+                }
+            }
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    fun trimMemory(level: Int) {
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL) {
+            clearAllCache()
+        } else if (level >= ComponentCallbacks2.TRIM_MEMORY_BACKGROUND ||
+            level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+            cache.trimToSize(cache.maxSize() / 2)
         }
     }
 
@@ -32,18 +72,6 @@ class SvgaMemoryCache private constructor() {
         if (maxBytes > 0) {
             cache.resize(maxBytes)
         }
-    }
-
-    private fun getImageSize(entity: SvgaVideoEntity?): Int {
-        val map = entity?.imageMap ?: return 1024
-        var size = 0
-        val visited = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<android.graphics.Bitmap, Boolean>())
-        map.values.forEach { bitmap ->
-            if (!bitmap.isRecycled && visited.add(bitmap)) {
-                size += bitmap.byteCount
-            }
-        }
-        return if (size <= 0) 1024 else size
     }
 
     fun put(key: String, entity: SvgaVideoEntity) {

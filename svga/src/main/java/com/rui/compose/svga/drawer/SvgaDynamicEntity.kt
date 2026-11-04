@@ -38,6 +38,10 @@ class SvgaDynamicEntity {
     @Volatile
     internal var isTextDirty = false
 
+    fun hasDynamicText(): Boolean {
+        return dynamicText.isNotEmpty() || dynamicStaticLayoutText.isNotEmpty() || dynamicBoringLayoutText.isNotEmpty()
+    }
+
     private val _dynamicSize = AtomicInteger(0)
     private val _loadOkSize = AtomicInteger(0)
 
@@ -250,6 +254,9 @@ class SvgaDynamicEntity {
         this.dynamicDrawerSized.clear()
         notifyDynamicChanged()
     }
+
+    /** 标准清理别名方法 */
+    fun clear() = clearDynamicObjects()
 }
 
 /**
