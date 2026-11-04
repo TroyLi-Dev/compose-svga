@@ -60,6 +60,8 @@ object SvgaDiskCache {
     fun buildCacheKeyForModel(model: Any?): String {
         if (model == null) return ""
         return when (model) {
+            is com.rui.compose.svga.parser.SvgaFetchResult.Stream -> model.cacheKey
+            is com.rui.compose.svga.parser.SvgaFetchResult.FileResult -> model.cacheKey
             is URL -> buildCacheKey(model.toString())
             is File -> buildCacheKey("file://${model.absolutePath}")
             is Int -> buildCacheKey("rawres://$model")
@@ -86,8 +88,9 @@ object SvgaDiskCache {
         }
     }
 
-    fun buildAudioFile(audioKey: String): File {
-        val audioDir = File(getCacheDir(), "audios").apply {
+    @JvmOverloads
+    fun buildAudioFile(audioKey: String, parentDir: File? = null): File {
+        val audioDir = parentDir ?: File(getCacheDir(), "audios").apply {
             if (!exists()) mkdirs()
         }
         val safeKey = buildCacheKey(audioKey)

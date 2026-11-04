@@ -393,7 +393,7 @@ class SvgaVideoEntity {
         val audiosDataMap = generateAudioMap(entity)
         val audiosFileMap = HashMap<String, File>()
         audiosDataMap.forEach { (key, bytes) ->
-            val audioCache = SvgaDiskCache.buildAudioFile(key)
+            val audioCache = SvgaDiskCache.buildAudioFile(key, cacheDir)
             if (!audioCache.exists() || audioCache.length() == 0L) {
                 val audioDir = audioCache.parentFile ?: cacheDir
                 val tmpFile = File(audioDir, "${audioCache.name}.${System.nanoTime()}.tmp")

@@ -122,7 +122,7 @@ class SvgaParser(
                 return decodeFromURL(model, callback)
             }
             is SvgaFetchResult.FileResult -> {
-                decodeFromFile(model.file, callback)
+                decodeFromFile(model.file, callback, model.cacheKey)
                 return null
             }
             is SvgaFetchResult.Stream -> {
@@ -440,16 +440,18 @@ class SvgaParser(
         }
     }
 
+    @JvmOverloads
     fun decodeFromFile(
         file: File,
-        callback: ParseCompletion?
+        callback: ParseCompletion?,
+        customCacheKey: String? = null
     ) {
         val handler = Handler(Looper.getMainLooper())
         if (!file.exists()) {
             handler.post { callback?.onError(Exception("File not found: ${file.absolutePath}"), file.name) }
             return
         }
-        val cacheKey = SvgaDiskCache.buildCacheKey("file://${file.absolutePath}")
+        val cacheKey = customCacheKey ?: SvgaDiskCache.buildCacheKey("file://${file.absolutePath}")
         val cached = SvgaMemoryCache.instance.get(cacheKey)
         if (cached != null) {
             handler.post { callback?.onComplete(cached) }

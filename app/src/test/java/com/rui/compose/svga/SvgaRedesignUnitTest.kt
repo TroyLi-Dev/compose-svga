@@ -464,4 +464,30 @@ class SvgaRedesignUnitTest {
         dynamic.setClickArea("btn_avatar")
         assertTrue(changed)
     }
+
+    @Test
+    fun testBuildCacheKeyForSvgaFetchResult() {
+        val mockFile = java.io.File("mock.svga")
+        val fileResult = com.rui.compose.svga.parser.SvgaFetchResult.FileResult(mockFile, "custom_cache_key_123")
+        assertEquals("custom_cache_key_123", SvgaDiskCache.buildCacheKeyForModel(fileResult))
+
+        val streamResult = com.rui.compose.svga.parser.SvgaFetchResult.Stream(
+            java.io.ByteArrayInputStream(ByteArray(0)),
+            "custom_stream_key_456"
+        )
+        assertEquals("custom_stream_key_456", SvgaDiskCache.buildCacheKeyForModel(streamResult))
+    }
+
+    @Test
+    fun testScopedBuildAudioFile() {
+        val tempDir = java.io.File(System.getProperty("java.io.tmpdir"), "svga_audio_test_${System.nanoTime()}")
+        tempDir.mkdirs()
+        try {
+            val audioFile = SvgaDiskCache.buildAudioFile("bgm_track", tempDir)
+            assertEquals(tempDir.absolutePath, audioFile.parentFile?.absolutePath)
+            assertTrue(audioFile.name.endsWith(".mp3"))
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
 }
