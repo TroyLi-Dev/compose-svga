@@ -14,7 +14,6 @@ class SvgaPathEntity(originValue: String) {
 
     companion object {
         private const val VALID_METHODS = "MLHVCSQRTAZmlhvcsqrtaz"
-        private val NEGATIVE_SIGN_REGEX = Regex("(?<![eE\\sMLHVCSQRTAZmlhvcsqrtaz])\\-")
 
         /**
          * W3C SVG 规范标准椭圆弧 (Elliptical Arc) 转三次贝塞尔曲线分解算法
@@ -137,12 +136,49 @@ class SvgaPathEntity(originValue: String) {
     }
 
     private val replacedValue: String = run {
-        var str = originValue
-        if (str.contains(",")) str = str.replace(",", " ")
-        if (str.contains("-")) {
-            str = str.replace(NEGATIVE_SIGN_REGEX, " -")
+        val len = originValue.length
+        val sb = java.lang.StringBuilder(len + (len shr 3))
+        var hasDot = false
+        var lastChar = ' '
+
+        for (i in 0 until len) {
+            val c = originValue[i]
+            when {
+                c == ',' || c == ' ' || c == '\t' || c == '\r' || c == '\n' -> {
+                    if (lastChar != ' ') {
+                        sb.append(' ')
+                        lastChar = ' '
+                    }
+                    hasDot = false
+                }
+                c == '-' -> {
+                    if (lastChar != ' ' && lastChar != 'e' && lastChar != 'E' && VALID_METHODS.indexOf(lastChar) < 0) {
+                        sb.append(' ')
+                    }
+                    sb.append('-')
+                    lastChar = '-'
+                    hasDot = false
+                }
+                c == '.' -> {
+                    if (hasDot) {
+                        sb.append(' ')
+                    }
+                    sb.append('.')
+                    lastChar = '.'
+                    hasDot = true
+                }
+                VALID_METHODS.indexOf(c) >= 0 -> {
+                    hasDot = false
+                    sb.append(c)
+                    lastChar = c
+                }
+                else -> {
+                    sb.append(c)
+                    lastChar = c
+                }
+            }
         }
-        str
+        sb.toString()
     }
 
     @Volatile
@@ -179,7 +215,7 @@ class SvgaPathEntity(originValue: String) {
                         operate(localPath, currentMethod, StringTokenizer("", ""), context)
                     }
                 } else {
-                    operate(localPath, currentMethod, StringTokenizer(segment, " "), context)
+                    operate(localPath, currentMethod, StringTokenizer(segment, " \t\r\n"), context)
                 }
             }
             this.cachedPath = localPath

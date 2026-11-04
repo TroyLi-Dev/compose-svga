@@ -446,4 +446,22 @@ class SvgaRedesignUnitTest {
         assertEquals(com.rui.compose.svga.model.SvgaPlayState.Idle, controller.playState)
         assertEquals(0, controller.currentFrame)
     }
+
+    @Test
+    fun testSvgPathParsingWithConsecutiveDotsAndWhitespace() {
+        val svgString = "M10.5.2L-5-10\t15\n20,25.5.5Z"
+        val pathEntity = com.rui.compose.svga.entity.SvgaPathEntity(svgString)
+        val path = android.graphics.Path()
+        pathEntity.buildPath(path)
+        assertNotNull(path)
+    }
+
+    @Test
+    fun testDynamicClickAreaTriggersOnChanged() {
+        val dynamic = com.rui.compose.svga.drawer.SvgaDynamicEntity()
+        var changed = false
+        dynamic.onDynamicChanged = { changed = true }
+        dynamic.setClickArea("btn_avatar")
+        assertTrue(changed)
+    }
 }

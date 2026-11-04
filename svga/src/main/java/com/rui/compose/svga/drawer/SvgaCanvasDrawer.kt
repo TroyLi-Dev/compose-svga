@@ -129,9 +129,17 @@ class SvgaCanvasDrawer(
         if (imageKey != null && imageKey.endsWith(".matte")) return false
         val matteKey = current.matteKey
         if (matteKey.isNullOrEmpty()) return false
-        if (spriteIndex == 0) return true
-        val lastSprite = sprites.getOrNull(spriteIndex - 1) ?: return true
-        return lastSprite.matteKey.isNullOrEmpty() || lastSprite.matteKey != matteKey
+
+        var prevIndex = spriteIndex - 1
+        while (prevIndex >= 0) {
+            val prev = sprites[prevIndex]
+            val prevKey = prev.imageKey
+            if (prevKey == null || !prevKey.endsWith(".matte")) {
+                return prev.matteKey.isNullOrEmpty() || prev.matteKey != matteKey
+            }
+            prevIndex--
+        }
+        return true
     }
 
     private fun isMatteEnd(spriteIndex: Int, sprites: List<SvgaDrawerSprite>): Boolean {
@@ -140,9 +148,17 @@ class SvgaCanvasDrawer(
         if (imageKey != null && imageKey.endsWith(".matte")) return false
         val matteKey = current.matteKey
         if (matteKey.isNullOrEmpty()) return false
-        if (spriteIndex == sprites.size - 1) return true
-        val nextSprite = sprites.getOrNull(spriteIndex + 1) ?: return true
-        return nextSprite.matteKey.isNullOrEmpty() || nextSprite.matteKey != matteKey
+
+        var nextIndex = spriteIndex + 1
+        while (nextIndex < sprites.size) {
+            val next = sprites[nextIndex]
+            val nextKey = next.imageKey
+            if (nextKey == null || !nextKey.endsWith(".matte")) {
+                return next.matteKey.isNullOrEmpty() || next.matteKey != matteKey
+            }
+            nextIndex++
+        }
+        return true
     }
 
     private var lastAudioFrame = -1
@@ -410,106 +426,106 @@ class SvgaCanvasDrawer(
                     textBitmap = null
                 }
             }
-        }
-
-        val boringLayout = dynamicItem.dynamicBoringLayoutText[imageKey]
-            ?: (if (noExtKey != null) dynamicItem.dynamicBoringLayoutText[noExtKey] else null)
-        boringLayout?.let {
-            val cached = drawTextCache[imageKey]
-            if (cached != null && !cached.bitmap.isRecycled &&
-                cached.text == it.text &&
-                cached.width == drawingBitmap.width &&
-                cached.height == drawingBitmap.height
-            ) {
-                textBitmap = cached.bitmap
-            } else {
-                cached?.bitmap?.let { old -> if (!old.isRecycled) old.recycle() }
-                try {
-                    it.paint.isAntiAlias = true
-                    val tb = Bitmap.createBitmap(
-                        drawingBitmap.width,
-                        drawingBitmap.height,
-                        Bitmap.Config.ARGB_8888
-                    )
-                    val textCanvas = Canvas(tb)
-                    textCanvas.translate(0f, ((drawingBitmap.height - it.height) / 2).toFloat())
-                    it.draw(textCanvas)
-                    drawTextCache[imageKey] = TextCacheEntry(it.text, drawingBitmap.width, drawingBitmap.height, tb)
-                    textBitmap = tb
-                } catch (t: Throwable) {
-                    com.rui.compose.svga.utils.log.LogUtils.error("SvgaCanvasDrawer", "Failed to create dynamicBoringLayoutText bitmap", t)
-                    textBitmap = null
+        } else {
+            val boringLayout = dynamicItem.dynamicBoringLayoutText[imageKey]
+                ?: (if (noExtKey != null) dynamicItem.dynamicBoringLayoutText[noExtKey] else null)
+            if (boringLayout != null) {
+                val cached = drawTextCache[imageKey]
+                if (cached != null && !cached.bitmap.isRecycled &&
+                    cached.text == boringLayout.text &&
+                    cached.width == drawingBitmap.width &&
+                    cached.height == drawingBitmap.height
+                ) {
+                    textBitmap = cached.bitmap
+                } else {
+                    cached?.bitmap?.let { old -> if (!old.isRecycled) old.recycle() }
+                    try {
+                        boringLayout.paint.isAntiAlias = true
+                        val tb = Bitmap.createBitmap(
+                            drawingBitmap.width,
+                            drawingBitmap.height,
+                            Bitmap.Config.ARGB_8888
+                        )
+                        val textCanvas = Canvas(tb)
+                        textCanvas.translate(0f, ((drawingBitmap.height - boringLayout.height) / 2).toFloat())
+                        boringLayout.draw(textCanvas)
+                        drawTextCache[imageKey] = TextCacheEntry(boringLayout.text, drawingBitmap.width, drawingBitmap.height, tb)
+                        textBitmap = tb
+                    } catch (t: Throwable) {
+                        com.rui.compose.svga.utils.log.LogUtils.error("SvgaCanvasDrawer", "Failed to create dynamicBoringLayoutText bitmap", t)
+                        textBitmap = null
+                    }
                 }
-            }
-        }
-
-        val staticLayout = dynamicItem.dynamicStaticLayoutText[imageKey]
-            ?: (if (noExtKey != null) dynamicItem.dynamicStaticLayoutText[noExtKey] else null)
-        staticLayout?.let {
-            val cached = drawTextCache[imageKey]
-            if (cached != null && !cached.bitmap.isRecycled &&
-                cached.text == it.text &&
-                cached.width == drawingBitmap.width &&
-                cached.height == drawingBitmap.height
-            ) {
-                textBitmap = cached.bitmap
             } else {
-                cached?.bitmap?.let { old -> if (!old.isRecycled) old.recycle() }
-                it.paint.isAntiAlias = true
-                val layout = if (it.width == drawingBitmap.width) {
-                    it
-                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    val lineMax = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
-                        it.maxLines
+                val staticLayout = dynamicItem.dynamicStaticLayoutText[imageKey]
+                    ?: (if (noExtKey != null) dynamicItem.dynamicStaticLayoutText[noExtKey] else null)
+                staticLayout?.let {
+                    val cached = drawTextCache[imageKey]
+                    if (cached != null && !cached.bitmap.isRecycled &&
+                        cached.text == it.text &&
+                        cached.width == drawingBitmap.width &&
+                        cached.height == drawingBitmap.height
+                    ) {
+                        textBitmap = cached.bitmap
                     } else {
+                        cached?.bitmap?.let { old -> if (!old.isRecycled) old.recycle() }
+                        it.paint.isAntiAlias = true
+                        val layout = if (it.width == drawingBitmap.width) {
+                            it
+                        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                            val lineMax = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+                                it.maxLines
+                            } else {
+                                try {
+                                    @SuppressLint("PrivateApi")
+                                    val field = StaticLayout::class.java.getDeclaredField("mMaximumVisibleLineCount")
+                                    field.isAccessible = true
+                                    field.getInt(it)
+                                } catch (_: Exception) {
+                                    Int.MAX_VALUE
+                                }
+                            }
+                            StaticLayout.Builder.obtain(
+                                it.text,
+                                0,
+                                it.text.length,
+                                it.paint,
+                                drawingBitmap.width
+                            )
+                                .setAlignment(it.alignment)
+                                .setMaxLines(lineMax)
+                                .setEllipsize(TextUtils.TruncateAt.END)
+                                .build()
+                        } else {
+                            @Suppress("DEPRECATION")
+                            StaticLayout(
+                                it.text,
+                                0,
+                                it.text.length,
+                                it.paint,
+                                drawingBitmap.width,
+                                it.alignment,
+                                it.spacingMultiplier,
+                                it.spacingAdd,
+                                false
+                            )
+                        }
                         try {
-                            @SuppressLint("PrivateApi")
-                            val field = StaticLayout::class.java.getDeclaredField("mMaximumVisibleLineCount")
-                            field.isAccessible = true
-                            field.getInt(it)
-                        } catch (_: Exception) {
-                            Int.MAX_VALUE
+                            val tb = Bitmap.createBitmap(
+                                drawingBitmap.width,
+                                drawingBitmap.height,
+                                Bitmap.Config.ARGB_8888
+                            )
+                            val textCanvas = Canvas(tb)
+                            textCanvas.translate(0f, ((drawingBitmap.height - layout.height) / 2).toFloat())
+                            layout.draw(textCanvas)
+                            drawTextCache[imageKey] = TextCacheEntry(it.text, drawingBitmap.width, drawingBitmap.height, tb)
+                            textBitmap = tb
+                        } catch (t: Throwable) {
+                            com.rui.compose.svga.utils.log.LogUtils.error("SvgaCanvasDrawer", "Failed to create text bitmap", t)
+                            textBitmap = null
                         }
                     }
-                    StaticLayout.Builder.obtain(
-                        it.text,
-                        0,
-                        it.text.length,
-                        it.paint,
-                        drawingBitmap.width
-                    )
-                        .setAlignment(it.alignment)
-                        .setMaxLines(lineMax)
-                        .setEllipsize(TextUtils.TruncateAt.END)
-                        .build()
-                } else {
-                    @Suppress("DEPRECATION")
-                    StaticLayout(
-                        it.text,
-                        0,
-                        it.text.length,
-                        it.paint,
-                        drawingBitmap.width,
-                        it.alignment,
-                        it.spacingMultiplier,
-                        it.spacingAdd,
-                        false
-                    )
-                }
-                try {
-                    val tb = Bitmap.createBitmap(
-                        drawingBitmap.width,
-                        drawingBitmap.height,
-                        Bitmap.Config.ARGB_8888
-                    )
-                    val textCanvas = Canvas(tb)
-                    textCanvas.translate(0f, ((drawingBitmap.height - layout.height) / 2).toFloat())
-                    layout.draw(textCanvas)
-                    drawTextCache[imageKey] = TextCacheEntry(it.text, drawingBitmap.width, drawingBitmap.height, tb)
-                    textBitmap = tb
-                } catch (t: Throwable) {
-                    com.rui.compose.svga.utils.log.LogUtils.error("SvgaCanvasDrawer", "Failed to create text bitmap", t)
-                    textBitmap = null
                 }
             }
         }
@@ -591,19 +607,22 @@ class SvgaCanvasDrawer(
                                 }
                             }
                             shape.styles?.miterLimit?.let { paint.strokeMiter = it.toFloat() * scale }
+                            paint.pathEffect = null
                             shape.styles?.lineDash?.let { dash ->
-                                if (scale > 0f && dash.size == 3 && (dash[0] > 0 || dash[1] > 0)) {
+                                if (scale > 0f && dash.size >= 2 && (dash[0] > 0 || dash[1] > 0)) {
                                     val interval0 = (dash[0] * scale).coerceAtLeast(1.0f)
                                     val interval1 = (dash[1] * scale).coerceAtLeast(0.1f)
+                                    val phase = if (dash.size >= 3) dash[2] * scale else 0f
                                     try {
                                         paint.pathEffect = DashPathEffect(
                                             this.sharedValues.sharedDashIntervals(interval0, interval1),
-                                            dash[2] * scale
+                                            phase
                                         )
                                     } catch (_: Throwable) {}
                                 }
                             }
                             canvas.drawPath(path, paint)
+                            paint.pathEffect = null
                         }
                     }
                 }

@@ -201,6 +201,7 @@ class SvgaDynamicEntity {
                 }
             }
         }
+        onDynamicChanged?.invoke()
         return this
     }
 
